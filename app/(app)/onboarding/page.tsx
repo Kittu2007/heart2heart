@@ -66,24 +66,50 @@ export default function OnboardingPage() {
 
     setIsSubmitting(true);
     try {
-      // Save profile to Firestore with timeout (profiles collection, UID as doc ID)
+      // 1. Save profile to Firestore (legacy support)
       const savePromise = setDoc(doc(db, "profiles", user.uid), {
         loveLanguage,
         communicationStyle: commStyle,
         comfortLevel,
         onboardingCompleted: true,
         updatedAt: serverTimestamp(),
-      });
+      }, { merge: true });
 
-      await Promise.race([
-        savePromise,
-        new Promise((_, reject) => setTimeout(() => reject(new Error("Timeout")), 5000))
+      // 2. Sync profile to Supabase (essential for API routes)
+      const syncProfile = async () => {
+        const token = await user.getIdToken();
+        const res = await fetch("/api/auth/sync", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${token}`,
+          },
+          body: JSON.stringify({
+            name: user.displayName || "User",
+          }),
+        });
+        if (!res.ok) {
+          const data = await res.json();
+          throw new Error(data.error || "Sync failed");
+        }
+      };
+
+      // Run both in parallel with timeout protection
+      await Promise.all([
+        Promise.race([
+          savePromise,
+          new Promise((_, reject) => setTimeout(() => reject(new Error("Firestore Timeout")), 8000))
+        ]),
+        Promise.race([
+          syncProfile(),
+          new Promise((_, reject) => setTimeout(() => reject(new Error("Sync Timeout")), 8000))
+        ])
       ]);
 
       router.push("/connect");
     } catch (error) {
-      console.error("Error saving onboarding data (may have timed out or failed):", error);
-      // Proceed anyway for the hackathon demo if it times out
+      console.error("Onboarding completion error:", error);
+      // Proceed to connect anyway, as the connect page now has fallback sync
       router.push("/connect");
     } finally {
       setIsSubmitting(false);
@@ -333,7 +359,7 @@ export default function OnboardingPage() {
                 {isSubmitting ? (
                   <>
                     <Loader2 className="animate-spin" size={20} />
-                    Saving Profile...
+                    Finalizing Profile...
                   </>
                 ) : (
                   "Save & Continue"

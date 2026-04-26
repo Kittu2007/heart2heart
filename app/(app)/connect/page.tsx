@@ -1,45 +1,77 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Copy, Check, Link as LinkIcon, HeartHandshake, Loader2, Heart, AlertCircle } from 'lucide-react';
+import { Copy, Check, Link as LinkIcon, HeartHandshake, Loader2, Heart, AlertCircle, RefreshCw } from 'lucide-react';
 import { auth } from '@/utils/firebase/client';
-import { onAuthStateChanged, User } from 'firebase/auth';
+import { onAuthStateChanged } from 'firebase/auth';
 import { playSound, SoundType } from '@/utils/sound';
 
-/* ── Helper: authenticated fetch with timeout ── */
-async function authFetch(url: string, options: RequestInit = {}, timeoutMs = 12000) {
+/* ── Helper: authenticated fetch with retry & timeout ── */
+async function authFetch(url: string, options: RequestInit = {}, timeoutMs = 15000) {
   const user = auth.currentUser;
   if (!user) throw new Error("Not authenticated");
 
   const token = await user.getIdToken();
 
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  const executeRequest = async (currentTimeout: number) => {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), currentTimeout);
 
-  try {
-    const res = await fetch(url, {
-      ...options,
-      signal: controller.signal,
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${token}`,
-        ...(options.headers || {}),
-      },
-    });
+    try {
+      const res = await fetch(url, {
+        ...options,
+        signal: controller.signal,
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+          ...(options.headers || {}),
+        },
+      });
 
-    const data = await res.json();
-    if (!res.ok) throw new Error(data.error || `Request failed (${res.status})`);
-    return data;
-  } catch (err: any) {
-    if (err.name === "AbortError") {
-      throw new Error("Request timed out. Check your connection and try again.");
+      const data = await res.json();
+      return { ok: res.ok, status: res.status, data };
+    } catch (err: any) {
+      if (err.name === "AbortError") {
+        throw new Error("Request timed out. Please check your connection.");
+      }
+      throw err;
+    } finally {
+      clearTimeout(timer);
     }
-    throw err;
-  } finally {
-    clearTimeout(timer);
+  };
+
+  // 1. Initial attempt
+  let result = await executeRequest(timeoutMs);
+
+  // 2. If 404 (Profile not found), try to sync once
+  if (!result.ok && result.status === 404) {
+    console.log("Profile not found in Supabase. Attempting auto-sync...");
+    try {
+      const syncRes = await fetch("/api/auth/sync", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({ name: user.displayName || "User" }),
+      });
+      
+      if (syncRes.ok) {
+        console.log("Auto-sync successful. Retrying original request...");
+        result = await executeRequest(timeoutMs); // Retry once
+      }
+    } catch (syncErr) {
+      console.error("Auto-sync failed:", syncErr);
+    }
   }
+
+  if (!result.ok) {
+    throw new Error(result.data?.error || `Request failed (${result.status})`);
+  }
+
+  return result.data;
 }
 
 export default function ConnectPage() {
@@ -53,6 +85,7 @@ export default function ConnectPage() {
   const [isGenerating, setIsGenerating] = useState(true);
   const [codeError, setCodeError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+  const fetchAttempted = useRef(false);
 
   /* ── Fetch existing couple or create a new one via API ── */
   const fetchOrCreateCode = useCallback(async () => {
@@ -72,7 +105,7 @@ export default function ConnectPage() {
       }
     } catch (err: any) {
       console.error("Error fetching/creating code:", err);
-      setCodeError(err?.message || "Could not generate your code. Please retry.");
+      setCodeError(err?.message || "Could not generate code. Please refresh.");
     } finally {
       setIsGenerating(false);
     }
@@ -83,9 +116,12 @@ export default function ConnectPage() {
     const unsubscribe = onAuthStateChanged(auth, (user) => {
       if (!user) {
         router.push("/login");
-      } else {
+      } else if (!fetchAttempted.current) {
+        fetchAttempted.current = true;
         setIsLoading(false);
         fetchOrCreateCode();
+      } else {
+        setIsLoading(false);
       }
     });
 
@@ -174,60 +210,72 @@ export default function ConnectPage() {
                   <div className="mx-auto bg-brand-rose/10 w-16 h-16 rounded-full flex items-center justify-center mb-4 text-brand-rose">
                     <HeartHandshake size={32} />
                   </div>
-                  <h1 className="text-2xl font-semibold mb-2">Connect with your Partner</h1>
-                  <p className="text-on-surface/60 text-sm">
+                  <h1 className="text-2xl font-semibold mb-2 text-[#1D1D1F]">Connect with your Partner</h1>
+                  <p className="text-[#86868b] text-sm">
                     Link your accounts to start your shared journey on Heart2Heart.
                   </p>
                 </div>
 
                 <div className="space-y-8">
                   {/* Share Code Section */}
-                  <div className="bg-surface-container/30 rounded-2xl p-6 border border-white/10 relative overflow-hidden">
-                    <div className="absolute inset-0 bg-gradient-to-br from-white/5 to-transparent pointer-events-none" />
-                    <h3 className="text-sm font-medium text-on-surface/70 mb-3 flex items-center justify-center gap-2">
-                      <LinkIcon size={16} /> Share Your Code
+                  <div className="bg-white/40 backdrop-blur-sm rounded-2xl p-6 border border-white/50 relative overflow-hidden shadow-sm">
+                    <div className="absolute inset-0 bg-gradient-to-br from-white/20 to-transparent pointer-events-none" />
+                    <h3 className="text-sm font-medium text-[#86868b] mb-3 flex items-center justify-center gap-2 uppercase tracking-wider">
+                      <LinkIcon size={14} /> Share Your Code
                     </h3>
                     <div className="flex items-center gap-2">
-                      <div className="flex-1 bg-background/50 border border-white/10 rounded-xl px-4 py-3 font-mono text-xl tracking-widest text-center min-h-[56px] flex items-center justify-center">
+                      <div className={`flex-1 bg-white/60 border ${codeError ? 'border-red-200' : 'border-white/80'} rounded-xl px-4 py-3 font-mono text-xl tracking-widest text-center min-h-[56px] flex items-center justify-center shadow-inner`}>
                         {isGenerating ? (
-                          <Loader2 className="w-5 h-5 animate-spin text-brand-rose/40" />
+                          <div className="flex items-center gap-2 text-[#86868b] text-sm font-sans tracking-normal">
+                            <Loader2 className="w-4 h-4 animate-spin text-brand-rose" />
+                            <span>Generating...</span>
+                          </div>
                         ) : codeError ? (
-                          <span className="text-red-400 text-sm font-sans tracking-normal">{codeError}</span>
+                          <div className="flex flex-col gap-1">
+                            <span className="text-red-500 text-[10px] font-sans tracking-normal font-medium leading-tight">
+                              {codeError.includes("timed out") ? "Connection timed out" : "Generation failed"}
+                            </span>
+                            <span className="text-[#86868b] text-[9px] font-sans tracking-normal">Click retry icon →</span>
+                          </div>
                         ) : (
-                          inviteCode || '------'
+                          <span className="text-[#1D1D1F] font-bold">{inviteCode || '------'}</span>
                         )}
                       </div>
-                      {codeError ? (
-                        <button
-                          onClick={handleRetryCodeGeneration}
-                          className="bg-brand-rose text-white p-3 rounded-xl hover:bg-brand-rose/90 transition-colors shadow-sm flex items-center justify-center w-12 h-12 flex-shrink-0"
-                          title="Retry"
-                        >
-                          <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 12a9 9 0 0 0-9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/><path d="M3 12a9 9 0 0 0 9 9 9.75 9.75 0 0 0 6.74-2.74L21 16"/><path d="M16 21h5v-5"/></svg>
-                        </button>
-                      ) : (
-                        <button
-                          onClick={handleCopyCode}
-                          disabled={isGenerating || !inviteCode}
-                          className="bg-brand-rose text-white p-3 rounded-xl hover:bg-brand-rose/90 transition-colors shadow-sm flex items-center justify-center w-12 h-12 flex-shrink-0 disabled:opacity-50"
-                          title="Copy to clipboard"
-                        >
-                          {copied ? <Check size={20} /> : <Copy size={20} />}
-                        </button>
-                      )}
+                      
+                      <button
+                        onClick={codeError ? handleRetryCodeGeneration : handleCopyCode}
+                        disabled={isGenerating || (!inviteCode && !codeError)}
+                        className={`p-3 rounded-xl transition-all shadow-sm flex items-center justify-center w-12 h-12 flex-shrink-0 disabled:opacity-50 active:scale-95 ${
+                          codeError ? 'bg-orange-500 text-white hover:bg-orange-600' : 'bg-brand-rose text-white hover:bg-brand-rose/90'
+                        }`}
+                        title={codeError ? "Retry" : "Copy to clipboard"}
+                      >
+                        {isGenerating ? (
+                          <Loader2 className="w-5 h-5 animate-spin" />
+                        ) : codeError ? (
+                          <RefreshCw size={20} />
+                        ) : (
+                          copied ? <Check size={20} /> : <Copy size={20} />
+                        )}
+                      </button>
                     </div>
+                    {codeError && (
+                      <p className="mt-3 text-[11px] text-orange-600 font-medium">
+                        Try refreshing if the issue persists.
+                      </p>
+                    )}
                   </div>
 
                   <div className="relative flex items-center py-2">
-                    <div className="flex-grow border-t border-white/10"></div>
-                    <span className="flex-shrink-0 mx-4 text-on-surface/40 text-xs font-medium uppercase tracking-wider">Or</span>
-                    <div className="flex-grow border-t border-white/10"></div>
+                    <div className="flex-grow border-t border-black/5"></div>
+                    <span className="flex-shrink-0 mx-4 text-[#86868b] text-[10px] font-bold uppercase tracking-widest">Or</span>
+                    <div className="flex-grow border-t border-black/5"></div>
                   </div>
 
                   {/* Join Section */}
                   <form onSubmit={handleConnect} className="space-y-4">
-                    <div>
-                      <label htmlFor="partnerCode" className="block text-sm font-medium text-on-surface/70 mb-2 text-left">
+                    <div className="text-left">
+                      <label htmlFor="partnerCode" className="block text-xs font-bold text-[#86868b] mb-2 uppercase tracking-wider ml-1">
                         Enter Partner Code
                       </label>
                       <input
@@ -239,36 +287,43 @@ export default function ConnectPage() {
                           if (error) setError(null);
                         }}
                         placeholder="e.g., B4K79Y"
-                        className="glass-input w-full px-4 py-3 rounded-xl border border-white/20 bg-white/5 focus:bg-white/10 focus:border-brand-rose/50 focus:ring-2 focus:ring-brand-rose/20 outline-none transition-all font-mono text-center tracking-widest uppercase placeholder:text-on-surface/30 placeholder:tracking-normal placeholder:normal-case"
+                        className="w-full px-4 py-3.5 rounded-xl border border-white/80 bg-white/60 focus:bg-white focus:border-brand-rose/30 focus:ring-4 focus:ring-brand-rose/10 outline-none transition-all font-mono text-center tracking-widest uppercase placeholder:text-black/20 placeholder:tracking-normal placeholder:normal-case shadow-inner text-lg"
                         maxLength={12}
                         disabled={isConnecting}
                       />
                     </div>
 
                     {error && (
-                      <div className="bg-red-500/10 border border-red-500/20 text-red-500 text-sm py-2 px-4 rounded-xl flex items-center gap-2">
-                        <AlertCircle size={16} className="flex-shrink-0" />
-                        {error}
+                      <div className="bg-red-50 text-red-600 text-xs py-3 px-4 rounded-xl flex items-center gap-2 border border-red-100 shadow-sm">
+                        <AlertCircle size={14} className="flex-shrink-0" />
+                        <span className="font-medium">{error}</span>
                       </div>
                     )}
 
                     <button
                       type="submit"
                       disabled={!partnerCode.trim() || partnerCode.length < 5 || isConnecting}
-                      className="w-full bg-on-surface text-background py-3.5 rounded-xl font-medium hover:opacity-90 transition-all shadow-md disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center"
+                      className="w-full bg-[#1D1D1F] text-white py-4 rounded-xl font-semibold hover:bg-black transition-all shadow-lg active:scale-[0.98] disabled:opacity-30 disabled:cursor-not-allowed flex items-center justify-center gap-2"
                     >
                       {isConnecting ? (
-                        <Loader2 className="w-5 h-5 animate-spin" />
+                        <>
+                          <Loader2 className="w-5 h-5 animate-spin" />
+                          <span>Connecting...</span>
+                        </>
                       ) : (
-                        'Connect Partner'
+                        <>
+                          <HeartHandshake size={18} />
+                          <span>Connect Partner</span>
+                        </>
                       )}
                     </button>
+                    
                     <button
                       type="button"
                       onClick={() => router.push('/dashboard')}
-                      className="w-full mt-4 text-[#78716c] text-sm font-medium hover:text-[#1a1c1b] transition-colors py-2"
+                      className="w-full mt-4 text-[#86868b] text-xs font-semibold hover:text-[#1D1D1F] transition-colors py-2 uppercase tracking-widest"
                     >
-                      Skip for now, continue to Dashboard
+                      Skip for now
                     </button>
                   </form>
                 </div>
@@ -281,11 +336,16 @@ export default function ConnectPage() {
                 transition={{ duration: 0.4, type: "spring" }}
                 className="py-12 flex flex-col items-center justify-center"
               >
-                <div className="w-20 h-20 bg-green-500/10 text-green-500 rounded-full flex items-center justify-center mb-6">
-                  <Heart className="w-10 h-10 fill-current animate-pulse-slow" />
+                <div className="w-24 h-24 bg-green-50 text-green-500 rounded-full flex items-center justify-center mb-6 shadow-sm border border-green-100">
+                  <motion.div
+                    animate={{ scale: [1, 1.2, 1] }}
+                    transition={{ repeat: Infinity, duration: 1.5 }}
+                  >
+                    <Heart className="w-12 h-12 fill-current" />
+                  </motion.div>
                 </div>
-                <h2 className="text-2xl font-semibold mb-2">Connected Successfully!</h2>
-                <p className="text-on-surface/60">
+                <h2 className="text-2xl font-bold mb-2 text-[#1D1D1F]">Connected Successfully!</h2>
+                <p className="text-[#86868b] font-medium">
                   Preparing your shared space...
                 </p>
               </motion.div>

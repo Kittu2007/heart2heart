@@ -47,7 +47,8 @@ export async function POST(req: NextRequest) {
   await syncProfileToFirestore(firebaseUid, { 
     name: profile.name,
     coupleId: profile.couple_id,
-    onboardingDone: profile.onboarding_done
+    onboardingDone: profile.onboarding_done,
+    dbId: profile.id
   });
 
   return Response.json({

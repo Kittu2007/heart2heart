@@ -100,20 +100,43 @@ export default function SettingsPage() {
             <div className="space-y-4">
               <div className="flex items-center justify-between p-3 rounded-2xl hover:bg-[#F5F5F7] transition-colors cursor-pointer group">
                 <div className="flex items-center gap-4">
-                  <div className="w-12 h-12 bg-[#F5F5F7] rounded-full flex items-center justify-center text-[#1D1D1F] overflow-hidden group-hover:bg-white transition-colors">
+                  <div className="w-12 h-12 bg-[#F5F5F7] rounded-full flex-shrink-0 flex items-center justify-center text-[#1D1D1F] overflow-hidden group-hover:bg-white transition-colors">
                     {user.photoURL ? (
                       <img src={user.photoURL} alt="Profile" className="w-full h-full object-cover" />
                     ) : (
                       <User size={24} />
                     )}
                   </div>
-                  <div>
-                    <p className="font-semibold">{profile?.displayName || user.displayName || "Set Display Name"}</p>
-                    <p className="text-sm text-[#86868B]">{user.email}</p>
+                  <div className="min-w-0">
+                    <p className="font-semibold truncate">{profile?.displayName || user.displayName || "Set Display Name"}</p>
+                    <p className="text-sm text-[#86868B] truncate">{user.email}</p>
                   </div>
                 </div>
                 <ChevronRight size={20} className="text-[#C1C1C6]" />
               </div>
+
+              {profile?.inviteCode && (
+                <div className="p-4 bg-brand-rose/5 rounded-2xl border border-brand-rose/10">
+                  <div className="flex items-center justify-between mb-1">
+                    <span className="text-xs font-semibold text-brand-rose uppercase tracking-wider">Your Invite Code</span>
+                    <button 
+                      onClick={() => {
+                        navigator.clipboard.writeText(profile.inviteCode);
+                        playSound(SoundType.SUCCESS);
+                      }}
+                      className="text-[10px] bg-brand-rose text-white px-2 py-0.5 rounded-full font-bold hover:bg-brand-rose/90 transition-colors"
+                    >
+                      COPY
+                    </button>
+                  </div>
+                  <p className="text-2xl font-mono font-bold tracking-[0.2em] text-[#1a1c1b] uppercase">
+                    {profile.inviteCode}
+                  </p>
+                  <p className="text-[10px] text-[#78716c] mt-2">
+                    Share this code with your partner to connect your accounts.
+                  </p>
+                </div>
+              )}
             </div>
           </section>
 

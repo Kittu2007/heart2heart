@@ -30,7 +30,7 @@ export default function TimelinePage() {
             const coupleDoc = await getDoc(doc(db, "couples", cid));
             if (coupleDoc.exists()) {
               const coupleData = coupleDoc.data();
-              const ids = [coupleData.partner_a_id, coupleData.partner_b_id].filter(Boolean);
+              const ids = [coupleData.partnerAId, coupleData.partnerBId].filter(Boolean);
               const namesMap: Record<string, string> = {};
               
               await Promise.all(ids.map(async (id: string) => {

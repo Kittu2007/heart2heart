@@ -11,6 +11,9 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     if (!loading && !user) {
       router.push("/login");
+    } else if (user) {
+      // Background sync to ensure Firestore profile and invite code are ready
+      fetch("/api/auth/sync").catch(console.error);
     }
   }, [user, loading, router]);
 

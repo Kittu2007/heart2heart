@@ -69,7 +69,7 @@ export const POST = withAuth(async (req: NextRequest, user: UserContext) => {
 
     // 5. Sync to Firestore
     await Promise.all([
-      syncProfileToFirestore(user.uid, { coupleId: couple.id }),
+      syncProfileToFirestore(user.uid, { coupleId: couple.id, dbId: user.dbId }),
       // Note: Partner A's Firestore doc will sync when they next login or via background process
       syncCoupleToFirestore(couple.id, { 
         partnerBId: user.dbId, 

@@ -71,6 +71,7 @@ export default function DashboardPage() {
   const [inviteCode, setInviteCode] = useState<string | null>(null);
   const [connectionScore, setConnectionScore] = useState(0);
   const [reflection, setReflection] = useState("");
+  const [dbId, setDbId] = useState<string | null>(null);
 
   // Profile listener — separate effect so it runs once user is set
   useEffect(() => {
@@ -81,6 +82,12 @@ export default function DashboardPage() {
         const data = docSnap.data();
         if (data.coupleId) {
           setCoupleId(data.coupleId);
+        }
+        if (data.dbId) {
+          setDbId(data.dbId);
+        }
+        if (data.inviteCode) {
+          setInviteCode(data.inviteCode);
         }
       }
     });
@@ -124,30 +131,31 @@ export default function DashboardPage() {
         setInviteCode(data.inviteCode);
       }
       
-      const partnerId = data?.partner_a_id === currentUser.uid ? data?.partner_b_id : data?.partner_a_id;
+      const partnerId = data?.partnerAId === dbId ? data?.partnerBId : data?.partnerAId;
       
       if (!partnerId) {
         setIsPartnerLoading(false);
         return;
       }
 
-      // Direct doc lookup instead of query (much faster)
+      // Query for the partner profile by their dbId
       try {
-        const partnerDoc = await getDoc(doc(db, "profiles", partnerId));
-        const partnerData = partnerDoc.exists() ? partnerDoc.data() : null;
-        
-        setPartner({
-          name: partnerData?.displayName || "Partner",
-          photoUrl: partnerData?.photoURL,
-          isOnline: false,
-          taskCompleted: false,
+        const partnerQuery = query(collection(db, "profiles"), where("dbId", "==", partnerId), limit(1));
+        const querySnap = await onSnapshot(partnerQuery, (snap) => {
+          if (!snap.empty) {
+            const partnerData = snap.docs[0].data();
+            setPartner(prev => ({
+              ...prev,
+              name: partnerData?.displayName || "Partner",
+              photoUrl: partnerData?.photoURL,
+              isOnline: prev?.isOnline ?? false,
+              taskCompleted: prev?.taskCompleted ?? false,
+            }));
+          }
         });
-      } catch {
-        setPartner({
-          name: "Partner",
-          isOnline: false,
-          taskCompleted: false,
-        });
+        cleanups.push(querySnap);
+      } catch (e) {
+        console.error("Partner lookup error:", e);
       }
       setIsPartnerLoading(false);
 

@@ -47,7 +47,7 @@ export const POST = withAuth(async (req: NextRequest, user: UserContext) => {
 
       // Sync to Firestore
       await Promise.all([
-        syncProfileToFirestore(user.dbId, { coupleId: existing.id }),
+        syncProfileToFirestore(user.uid, { coupleId: existing.id, dbId: user.dbId }),
         syncCoupleToFirestore(existing.id, { 
           inviteCode: existing.invite_code, 
           partnerAId: user.dbId,
@@ -92,7 +92,7 @@ export const POST = withAuth(async (req: NextRequest, user: UserContext) => {
 
     // 4. Sync to Firestore
     await Promise.all([
-      syncProfileToFirestore(user.dbId, { coupleId: couple.id }),
+      syncProfileToFirestore(user.uid, { coupleId: couple.id, dbId: user.dbId }),
       syncCoupleToFirestore(couple.id, { 
         inviteCode: couple.invite_code, 
         partnerAId: user.dbId,

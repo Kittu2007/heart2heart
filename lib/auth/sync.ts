@@ -43,7 +43,9 @@ export async function syncFirebaseUserToSupabase(
       await syncProfileToFirestore(firebaseUid, {
         name: userData.name,
         coupleId: (retry as any).couple_id,
-        onboardingDone: (retry as any).onboarding_done
+        onboardingDone: (retry as any).onboarding_done,
+        dbId: dbId,
+        inviteCode: (retry as any).invite_code || undefined
       });
       return { profile: retry as Profile, error: null };
     }
@@ -55,7 +57,9 @@ export async function syncFirebaseUserToSupabase(
   await syncProfileToFirestore(firebaseUid, {
     name: userData.name,
     coupleId: profile.couple_id,
-    onboardingDone: profile.onboarding_done
+    onboardingDone: profile.onboarding_done,
+    dbId: dbId,
+    inviteCode: (profile as any).invite_code || undefined
   });
 
   console.log('[SYNC] success, profile dbId:', profile?.id);
@@ -80,12 +84,18 @@ export async function syncFirebaseUserToSupabase(
           .single();
         if (updated) profile.couple_id = updated.couple_id;
 
-        await syncCoupleToFirestore(existing.id, {
-          inviteCode: existing.invite_code,
-          partnerAId: existing.partner_a_id,
-          partnerBId: existing.partner_b_id,
-          status: existing.status
-        });
+        await Promise.all([
+          syncProfileToFirestore(firebaseUid, {
+            coupleId: existing.id,
+            inviteCode: existing.invite_code
+          }),
+          syncCoupleToFirestore(existing.id, {
+            inviteCode: existing.invite_code,
+            partnerAId: existing.partner_a_id,
+            partnerBId: existing.partner_b_id,
+            status: existing.status
+          })
+        ]);
       } else {
         console.log('[SYNC] Creating new permanent invite code...');
         const inviteCode = Math.random().toString(36).substring(2, 8).toUpperCase();
@@ -105,7 +115,14 @@ export async function syncFirebaseUserToSupabase(
             .eq('id', dbId)
             .select()
             .single();
-          if (updatedProfile) profile.couple_id = updatedProfile.couple_id;
+          if (updatedProfile) {
+            profile.couple_id = updatedProfile.couple_id;
+            // Sync updated profile with code
+            await syncProfileToFirestore(firebaseUid, {
+              coupleId: newCouple.id,
+              inviteCode: newCouple.invite_code
+            });
+          }
 
           await syncCoupleToFirestore(newCouple.id, {
             inviteCode: newCouple.invite_code,

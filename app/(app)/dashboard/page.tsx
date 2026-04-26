@@ -42,6 +42,7 @@ interface Partner {
   taskCompleted: boolean;
   photoUrl?: string;
   mood?: string;
+  _lastSeenDate?: Date; // Internal helper for timer
 }
 
 export default function DashboardPage() {
@@ -118,7 +119,7 @@ export default function DashboardPage() {
 
   // Partner & Couple Sync — only runs when coupleId is available
   useEffect(() => {
-    if (!currentUser || !coupleId) return;
+    if (!currentUser || !coupleId || !dbId) return;
 
     setIsPartnerLoading(true);
     const cleanups: (() => void)[] = [];
@@ -147,10 +148,6 @@ export default function DashboardPage() {
       }
       setCoupleStatus(newStatus);
 
-      if (data?.inviteCode) {
-        setInviteCode(data.inviteCode);
-      }
-
       // Determine partner ID based on current user's position
       const currentUserId = dbId;
       if (data?.partnerAId === currentUserId) {
@@ -158,7 +155,8 @@ export default function DashboardPage() {
       } else if (data?.partnerBId === currentUserId) {
         partnerId = data?.partnerAId || null;
       } else {
-        partnerId = data?.partnerAId || data?.partnerBId || null;
+        // Fallback for edge cases, though dbId check should prevent this
+        partnerId = data?.partnerAId === dbId ? data?.partnerBId : data?.partnerAId;
       }
 
       if (!partnerId) {
@@ -179,21 +177,21 @@ export default function DashboardPage() {
 
       setIsPartnerLoading(false);
 
+      // Function to calculate online status from lastSeen
+      const calculateOnlineStatus = (lastSeenDate: Date | null | undefined) => {
+        if (!lastSeenDate) return false;
+        return (new Date().getTime() - lastSeenDate.getTime() < 60000);
+      };
+
       // Query for the partner profile by their dbId (Supabase UUID)
-      // This is more robust than direct doc access because doc IDs are Firebase UIDs
       try {
         const partnerQuery = query(collection(db, "profiles"), where("dbId", "==", partnerId), limit(1));
         const querySnap = onSnapshot(partnerQuery, (snap) => {
           if (!snap.empty) {
             const partnerData = snap.docs[0].data();
             const lastSeen = partnerData.lastSeen?.toDate();
-            const isOnline = lastSeen ? (new Date().getTime() - lastSeen.getTime() < 60000) : false;
-
-            console.log(`[Dashboard] Partner data received:`, partnerData.displayName, "Online:", isOnline);
-
+            
             setPartner(prev => {
-              // Note: We don't return null here if prev is null because we want to initialize it
-              // if it's the first time we get data
               const base = prev || { 
                 name: "Partner", 
                 isOnline: false, 
@@ -204,23 +202,33 @@ export default function DashboardPage() {
                 ...base,
                 name: partnerData?.displayName || partnerData?.name || base.name,
                 photoUrl: partnerData?.photoURL || base.photoUrl,
-                isOnline,
+                isOnline: calculateOnlineStatus(lastSeen),
                 lastSeen: lastSeen?.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
                 mood: partnerData?.mood || base.mood,
+                _lastSeenDate: lastSeen // Internal helper for timer
               };
             });
-          } else {
-            console.warn(`[Dashboard] No profile found in Firestore for partner dbId: ${partnerId}`);
           }
-        }, (err) => {
-          console.error("[Dashboard] Partner query error:", err);
         });
         cleanups.push(querySnap);
       } catch (e) {
         console.error("Partner lookup error:", e);
       }
 
-      // Listen for partner's task completion (single-field query + client filter)
+      // Add a periodic timer to refresh the "isOnline" status locally
+      // This is crucial because if the partner's lastSeen document doesn't update,
+      // the onSnapshot won't fire, but the partner might have just timed out.
+      const onlineTimer = setInterval(() => {
+        setPartner(prev => {
+          if (!prev || !prev._lastSeenDate) return prev;
+          const stillOnline = calculateOnlineStatus(prev._lastSeenDate);
+          if (stillOnline === prev.isOnline) return prev;
+          return { ...prev, isOnline: stillOnline };
+        });
+      }, 30000);
+      cleanups.push(() => clearInterval(onlineTimer));
+
+      // Listen for partner's task completion
       const taskQ = query(
         collection(db, "completed_tasks"),
         where("userId", "==", partnerId)
@@ -234,21 +242,17 @@ export default function DashboardPage() {
         });
         setPartner(prev => {
           if (!prev) return null;
-          return {
-            ...prev,
-            taskCompleted: hasToday,
-          };
+          return { ...prev, taskCompleted: hasToday };
         });
-      }, () => {/* ignore errors */});
+      }, () => {});
       cleanups.push(taskUnsub);
 
-      // Listen for partner's mood (single-field query + client filter)
+      // Listen for partner's mood
       const moodQ = query(
         collection(db, "mood_checkins"),
         where("userId", "==", partnerId)
       );
       const moodUnsub = onSnapshot(moodQ, (snapshot) => {
-        // Find the most recent shared mood client-side
         let latest: any = null;
         let latestTime = 0;
         snapshot.docs.forEach(d => {
@@ -264,18 +268,15 @@ export default function DashboardPage() {
         if (latest) {
           setPartner(prev => {
             if (!prev) return null;
-            return {
-              ...prev,
-              mood: latest.mood,
-            };
+            return { ...prev, mood: latest.mood };
           });
         }
-      }, () => {/* ignore errors */});
+      }, () => {});
       cleanups.push(moodUnsub);
     });
     cleanups.push(coupleUnsub);
 
-    // Connection Score — single-field query + client sort
+    // Connection Score
     const feedbackQ = query(
       collection(db, "feedback"), 
       where("coupleId", "==", coupleId)
@@ -285,17 +286,13 @@ export default function DashboardPage() {
         setConnectionScore(0);
         return;
       }
-
       let totalRating = 0;
-      // Sort by submittedAt descending, take top 20
       const sorted = snapshot.docs
         .map(d => d.data())
         .sort((a, b) => (b.submittedAt?.toDate()?.getTime() || 0) - (a.submittedAt?.toDate()?.getTime() || 0))
         .slice(0, 20);
-
       sorted.forEach(d => totalRating += d.rating || 0);
       const avgRating = totalRating / sorted.length;
-      
       const calculated = Math.min(100, Math.floor((avgRating / 5) * 80 + (sorted.length * 2)));
       setConnectionScore(calculated);
     }, () => {

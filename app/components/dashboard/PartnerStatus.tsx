@@ -41,7 +41,7 @@ export default function PartnerStatus({
   const currentUserName = currentUser?.name || "You";
   const bothCompleted = currentUserTaskCompleted && partner?.taskCompleted;
 
-  if (isLoading || (coupleStatus === 'active' && !partner)) {
+  if (isLoading) {
     return (
       <div className="col-span-1 md:col-span-2 lg:col-span-1 bg-surface backdrop-blur-apple rounded-[24px] p-6 lg:p-8 shadow-apple-card border border-black/5 flex flex-col gap-5">
         <div className="h-6 w-32 bg-gray-100 rounded-md animate-pulse" />
@@ -51,6 +51,29 @@ export default function PartnerStatus({
           <div className="w-14 h-14 rounded-full bg-gray-100 animate-pulse" />
         </div>
         <div className="h-16 w-full bg-gray-100 rounded-2xl animate-pulse mt-auto" />
+      </div>
+    );
+  }
+
+  // If connected but partner profile not found, show a basic linked state instead of skeleton
+  if (!partner && coupleStatus === 'active') {
+    return (
+      <div className="col-span-1 md:col-span-2 lg:col-span-1 bg-surface backdrop-blur-apple rounded-[24px] p-6 lg:p-8 shadow-apple-card border border-black/5 flex flex-col">
+        <div className="flex flex-col items-center py-4">
+          <div className="w-16 h-16 bg-brand-rose/10 rounded-full flex items-center justify-center mb-4">
+            <User size={28} className="text-brand-rose/40" />
+          </div>
+          <h3 className="text-lg font-bold text-black mb-1">Partner Linked</h3>
+          <p className="text-xs text-[#78716c] mb-6 text-center">Waiting for partner to sync profile...</p>
+          
+          <Link
+            href="/settings"
+            className="w-full py-2.5 px-4 bg-black/5 text-[#78716c] rounded-xl text-xs font-semibold flex items-center justify-center gap-2 hover:bg-black/10 transition-all"
+          >
+            <ShieldAlert size={14} />
+            Manage Connection
+          </Link>
+        </div>
       </div>
     );
   }

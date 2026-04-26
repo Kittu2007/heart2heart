@@ -21,16 +21,40 @@ export type UserContext = {
 };
 
 export async function getAuthUser(req: NextRequest): Promise<UserContext> {
-  const firebaseUid = await verifyFirebaseToken(req);
-  if (!firebaseUid) throw new AuthError('Unauthorized: Invalid or missing token', 401);
+  const decodedToken = await verifyFirebaseToken(req);
+  if (!decodedToken) throw new AuthError('Unauthorized: Invalid or missing token', 401);
+
+  const firebaseUid = decodedToken.uid;
 
   const query = supabaseAdmin.from('profiles') as any;
-  const { data: profile, error } = await query
+  let { data: profile, error } = await query
     .select('id, name, couple_id, onboarding_done, comfort_level')
     .eq('id', firebaseUid)
     .single();
 
-  if (error || !profile) throw new AuthError('User profile not found. Call /api/auth/sync first.', 404);
+  // PERMANENT FIX: Auto-create profile if missing
+  if (error && error.code === 'PGRST116' || !profile) {
+    console.log(`[Auth] Profile missing for ${firebaseUid}, auto-creating...`);
+    const { data: newProfile, error: createError } = await query
+      .insert({
+        id: firebaseUid,
+        name: decodedToken.name || decodedToken.email?.split('@')[0] || 'User',
+        avatar_url: decodedToken.picture || null,
+        onboarding_done: false,
+        comfort_level: 3,
+      })
+      .select('id, name, couple_id, onboarding_done, comfort_level')
+      .single();
+
+    if (createError) {
+      console.error('[Auth] Failed to auto-create profile:', createError);
+      throw new AuthError('Failed to initialize user profile', 500);
+    }
+    profile = newProfile;
+  } else if (error) {
+    console.error('[Auth] Database error:', error);
+    throw new AuthError('Database connection error', 500);
+  }
 
   return {
     uid: profile.id,

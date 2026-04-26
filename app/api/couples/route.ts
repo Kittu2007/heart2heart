@@ -22,16 +22,42 @@ async function getUniqueInviteCode(): Promise<string> {
   throw new Error('Could not generate unique invite code after 10 attempts');
 }
 
-// POST /api/couples — create a new couple
+// POST /api/couples — create a new couple or return existing pending one
 export const POST = withAuth(async (req: NextRequest, user: UserContext) => {
   if (user.coupleId) {
     return Response.json({ error: 'You are already part of a couple' }, { status: 409 });
   }
 
   try {
-    const inviteCode = await getUniqueInviteCode();
-
     const couplesQuery = supabaseAdmin.from('couples') as any;
+
+    // 1. Check if we already have a pending couple (fix for potential race conditions/orphaned rows)
+    const { data: existing } = await couplesQuery
+      .select('id, invite_code, status, created_at')
+      .eq('partner_a_id', user.uid)
+      .eq('status', 'pending')
+      .maybeSingle();
+
+    if (existing) {
+      // Ensure profile is linked (self-healing)
+      await (supabaseAdmin.from('profiles') as any)
+        .update({ couple_id: existing.id })
+        .eq('id', user.uid);
+
+      return Response.json({
+        couple: {
+          id: existing.id,
+          inviteCode: existing.invite_code,
+          status: existing.status,
+          createdAt: existing.created_at,
+          partnerAId: user.uid,
+          partnerBId: null,
+        },
+      }, { status: 200 });
+    }
+
+    // 2. Generate unique code and insert
+    const inviteCode = await getUniqueInviteCode();
     const { data: couple, error: createError } = await couplesQuery
       .insert({
         invite_code: inviteCode,
@@ -43,13 +69,15 @@ export const POST = withAuth(async (req: NextRequest, user: UserContext) => {
 
     if (createError) throw createError;
 
-    // Link profile to this couple
+    // 3. Link profile to this couple
     const profilesQuery = supabaseAdmin.from('profiles') as any;
     const { error: profileError } = await profilesQuery
       .update({ couple_id: couple.id })
       .eq('id', user.uid);
 
-    if (profileError) throw profileError;
+    if (profileError) {
+      console.error('[COUPLES] Profile link error (non-fatal):', profileError);
+    }
 
     return Response.json({
       couple: {
@@ -61,9 +89,12 @@ export const POST = withAuth(async (req: NextRequest, user: UserContext) => {
         partnerBId: null,
       },
     }, { status: 201 });
-  } catch (error) {
+  } catch (error: any) {
     console.error('Create couple error:', error);
-    return Response.json({ error: 'Failed to create couple' }, { status: 500 });
+    return Response.json({ 
+      error: 'Failed to create couple', 
+      details: error?.message || 'Unknown error' 
+    }, { status: 500 });
   }
 });
 

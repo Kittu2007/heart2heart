@@ -1,5 +1,5 @@
 import { initializeApp, getApps, cert } from 'firebase-admin/app';
-import { getAuth } from 'firebase-admin/auth';
+import { getAuth, DecodedIdToken } from 'firebase-admin/auth';
 import type { NextRequest } from 'next/server';
 
 // Initialize Firebase Admin lazily (Node.js runtime only — safe in API routes)
@@ -20,7 +20,7 @@ function initFirebaseAdmin() {
   }
 }
 
-export async function verifyFirebaseToken(req: NextRequest): Promise<string | null> {
+export async function verifyFirebaseToken(req: NextRequest): Promise<DecodedIdToken | null> {
   initFirebaseAdmin();
 
   // Primary: x-auth-token set by middleware
@@ -38,7 +38,7 @@ export async function verifyFirebaseToken(req: NextRequest): Promise<string | nu
 
   try {
     const decoded = await getAuth().verifyIdToken(token);
-    return decoded.uid;
+    return decoded;
   } catch {
     return null;
   }

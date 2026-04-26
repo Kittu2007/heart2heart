@@ -8,70 +8,41 @@ import { auth } from '@/utils/firebase/client';
 import { onAuthStateChanged } from 'firebase/auth';
 import { playSound, SoundType } from '@/utils/sound';
 
-/* ── Helper: authenticated fetch with retry & timeout ── */
-async function authFetch(url: string, options: RequestInit = {}, timeoutMs = 15000) {
+/* ── Helper: authenticated fetch with timeout ── */
+async function authFetch(url: string, options: RequestInit = {}, timeoutMs = 20000) {
   const user = auth.currentUser;
   if (!user) throw new Error("Not authenticated");
 
   const token = await user.getIdToken();
 
-  const executeRequest = async (currentTimeout: number) => {
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), currentTimeout);
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
 
-    try {
-      const res = await fetch(url, {
-        ...options,
-        signal: controller.signal,
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
-          ...(options.headers || {}),
-        },
-      });
+  try {
+    const res = await fetch(url, {
+      ...options,
+      signal: controller.signal,
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${token}`,
+        ...(options.headers || {}),
+      },
+    });
 
-      const data = await res.json();
-      return { ok: res.ok, status: res.status, data };
-    } catch (err: any) {
-      if (err.name === "AbortError") {
-        throw new Error("Request timed out. Please check your connection.");
-      }
-      throw err;
-    } finally {
-      clearTimeout(timer);
+    const data = await res.json();
+    if (!res.ok) {
+      const msg = data.error || data.details || `Request failed (${res.status})`;
+      throw new Error(msg);
     }
-  };
-
-  // 1. Initial attempt
-  let result = await executeRequest(timeoutMs);
-
-  // 2. If 404 (Profile not found), try to sync once
-  if (!result.ok && result.status === 404) {
-    console.log("Profile not found in Supabase. Attempting auto-sync...");
-    try {
-      const syncRes = await fetch("/api/auth/sync", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
-        },
-        body: JSON.stringify({ name: user.displayName || "User" }),
-      });
-      
-      if (syncRes.ok) {
-        console.log("Auto-sync successful. Retrying original request...");
-        result = await executeRequest(timeoutMs); // Retry once
-      }
-    } catch (syncErr) {
-      console.error("Auto-sync failed:", syncErr);
+    return data;
+  } catch (err: any) {
+    if (err.name === "AbortError") {
+      throw new Error("Connection timed out. The server might be waking up, please try again.");
     }
+    throw err;
+  } finally {
+    clearTimeout(timer);
   }
-
-  if (!result.ok) {
-    throw new Error(result.data?.error || `Request failed (${result.status})`);
-  }
-
-  return result.data;
 }
 
 export default function ConnectPage() {
@@ -98,6 +69,10 @@ export default function ConnectPage() {
 
       if (getResult.couple && getResult.couple.invite_code) {
         setInviteCode(getResult.couple.invite_code);
+        // If already active, just go to dashboard
+        if (getResult.couple.status === 'active') {
+          router.push('/dashboard');
+        }
       } else {
         // 2. No couple yet — create one
         const createResult = await authFetch("/api/couples", { method: "POST" });
@@ -105,11 +80,11 @@ export default function ConnectPage() {
       }
     } catch (err: any) {
       console.error("Error fetching/creating code:", err);
-      setCodeError(err?.message || "Could not generate code. Please refresh.");
+      setCodeError(err?.message || "Generation failed");
     } finally {
       setIsGenerating(false);
     }
-  }, []);
+  }, [router]);
 
   // Auth check
   useEffect(() => {
@@ -224,28 +199,30 @@ export default function ConnectPage() {
                       <LinkIcon size={14} /> Share Your Code
                     </h3>
                     <div className="flex items-center gap-2">
-                      <div className={`flex-1 bg-white/60 border ${codeError ? 'border-red-200' : 'border-white/80'} rounded-xl px-4 py-3 font-mono text-xl tracking-widest text-center min-h-[56px] flex items-center justify-center shadow-inner`}>
+                      <div className={`flex-1 bg-white/60 border ${codeError ? 'border-red-200' : 'border-white/80'} rounded-xl px-4 py-3 font-mono text-xl tracking-widest text-center min-h-[64px] flex items-center justify-center shadow-inner`}>
                         {isGenerating ? (
                           <div className="flex items-center gap-2 text-[#86868b] text-sm font-sans tracking-normal">
                             <Loader2 className="w-4 h-4 animate-spin text-brand-rose" />
                             <span>Generating...</span>
                           </div>
                         ) : codeError ? (
-                          <div className="flex flex-col gap-1">
-                            <span className="text-red-500 text-[10px] font-sans tracking-normal font-medium leading-tight">
-                              {codeError.includes("timed out") ? "Connection timed out" : "Generation failed"}
+                          <div className="flex flex-col gap-1 py-1 px-2">
+                            <span className="text-red-500 text-[11px] font-sans tracking-normal font-bold leading-tight uppercase">
+                              {codeError.includes("timeout") ? "Timed Out" : "Failed"}
                             </span>
-                            <span className="text-[#86868b] text-[9px] font-sans tracking-normal">Click retry icon →</span>
+                            <span className="text-[#86868b] text-[10px] font-sans tracking-normal leading-tight">
+                              {codeError.includes("timeout") ? "Server is waking up" : codeError}
+                            </span>
                           </div>
                         ) : (
-                          <span className="text-[#1D1D1F] font-bold">{inviteCode || '------'}</span>
+                          <span className="text-[#1D1D1F] font-bold text-2xl">{inviteCode || '------'}</span>
                         )}
                       </div>
                       
                       <button
                         onClick={codeError ? handleRetryCodeGeneration : handleCopyCode}
                         disabled={isGenerating || (!inviteCode && !codeError)}
-                        className={`p-3 rounded-xl transition-all shadow-sm flex items-center justify-center w-12 h-12 flex-shrink-0 disabled:opacity-50 active:scale-95 ${
+                        className={`p-3 rounded-xl transition-all shadow-sm flex items-center justify-center w-14 h-14 flex-shrink-0 disabled:opacity-50 active:scale-95 ${
                           codeError ? 'bg-orange-500 text-white hover:bg-orange-600' : 'bg-brand-rose text-white hover:bg-brand-rose/90'
                         }`}
                         title={codeError ? "Retry" : "Copy to clipboard"}
@@ -253,17 +230,12 @@ export default function ConnectPage() {
                         {isGenerating ? (
                           <Loader2 className="w-5 h-5 animate-spin" />
                         ) : codeError ? (
-                          <RefreshCw size={20} />
+                          <RefreshCw size={24} />
                         ) : (
-                          copied ? <Check size={20} /> : <Copy size={20} />
+                          copied ? <Check size={24} /> : <Copy size={24} />
                         )}
                       </button>
                     </div>
-                    {codeError && (
-                      <p className="mt-3 text-[11px] text-orange-600 font-medium">
-                        Try refreshing if the issue persists.
-                      </p>
-                    )}
                   </div>
 
                   <div className="relative flex items-center py-2">
@@ -278,32 +250,34 @@ export default function ConnectPage() {
                       <label htmlFor="partnerCode" className="block text-xs font-bold text-[#86868b] mb-2 uppercase tracking-wider ml-1">
                         Enter Partner Code
                       </label>
-                      <input
-                        id="partnerCode"
-                        type="text"
-                        value={partnerCode}
-                        onChange={(e) => {
-                          setPartnerCode(e.target.value.toUpperCase());
-                          if (error) setError(null);
-                        }}
-                        placeholder="e.g., B4K79Y"
-                        className="w-full px-4 py-3.5 rounded-xl border border-white/80 bg-white/60 focus:bg-white focus:border-brand-rose/30 focus:ring-4 focus:ring-brand-rose/10 outline-none transition-all font-mono text-center tracking-widest uppercase placeholder:text-black/20 placeholder:tracking-normal placeholder:normal-case shadow-inner text-lg"
-                        maxLength={12}
-                        disabled={isConnecting}
-                      />
+                      <div className="relative">
+                        <input
+                          id="partnerCode"
+                          type="text"
+                          value={partnerCode}
+                          onChange={(e) => {
+                            setPartnerCode(e.target.value.toUpperCase());
+                            if (error) setError(null);
+                          }}
+                          placeholder="e.g., B4K79Y"
+                          className="w-full px-4 py-4 rounded-xl border border-white/80 bg-white/60 focus:bg-white focus:border-brand-rose/30 focus:ring-4 focus:ring-brand-rose/10 outline-none transition-all font-mono text-center tracking-widest uppercase placeholder:text-black/20 shadow-inner text-xl"
+                          maxLength={12}
+                          disabled={isConnecting}
+                        />
+                      </div>
                     </div>
 
                     {error && (
-                      <div className="bg-red-50 text-red-600 text-xs py-3 px-4 rounded-xl flex items-center gap-2 border border-red-100 shadow-sm">
-                        <AlertCircle size={14} className="flex-shrink-0" />
-                        <span className="font-medium">{error}</span>
+                      <div className="bg-red-50 text-red-600 text-[13px] py-3 px-4 rounded-xl flex items-center gap-2 border border-red-100 shadow-sm">
+                        <AlertCircle size={16} className="flex-shrink-0" />
+                        <span className="font-semibold">{error}</span>
                       </div>
                     )}
 
                     <button
                       type="submit"
                       disabled={!partnerCode.trim() || partnerCode.length < 5 || isConnecting}
-                      className="w-full bg-[#1D1D1F] text-white py-4 rounded-xl font-semibold hover:bg-black transition-all shadow-lg active:scale-[0.98] disabled:opacity-30 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+                      className="w-full bg-[#1D1D1F] text-white py-4.5 rounded-xl font-bold hover:bg-black transition-all shadow-lg active:scale-[0.98] disabled:opacity-30 disabled:cursor-not-allowed flex items-center justify-center gap-2 text-lg"
                     >
                       {isConnecting ? (
                         <>
@@ -312,7 +286,7 @@ export default function ConnectPage() {
                         </>
                       ) : (
                         <>
-                          <HeartHandshake size={18} />
+                          <HeartHandshake size={20} />
                           <span>Connect Partner</span>
                         </>
                       )}
@@ -321,9 +295,9 @@ export default function ConnectPage() {
                     <button
                       type="button"
                       onClick={() => router.push('/dashboard')}
-                      className="w-full mt-4 text-[#86868b] text-xs font-semibold hover:text-[#1D1D1F] transition-colors py-2 uppercase tracking-widest"
+                      className="w-full mt-4 text-[#86868b] text-[11px] font-bold hover:text-[#1D1D1F] transition-colors py-2 uppercase tracking-widest"
                     >
-                      Skip for now
+                      Skip for now, continue to Dashboard
                     </button>
                   </form>
                 </div>

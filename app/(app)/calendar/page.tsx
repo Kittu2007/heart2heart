@@ -94,7 +94,7 @@ export default function CalendarPage() {
     });
 
     return () => unsubscribe();
-  }, [currentUser, coupleId, isLoading]);
+  }, [currentUser, coupleId]);
 
   const prevMonth = () => {
     setCurrentMonth(

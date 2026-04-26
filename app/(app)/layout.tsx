@@ -13,7 +13,19 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
       router.push("/login");
     } else if (user) {
       // Background sync to ensure Firestore profile and invite code are ready
-      fetch("/api/auth/sync").catch(console.error);
+      user.getIdToken().then(token => {
+        fetch("/api/auth/sync", {
+          method: "POST",
+          headers: { 
+            "Content-Type": "application/json",
+            "Authorization": `Bearer ${token}` 
+          },
+          body: JSON.stringify({ 
+            name: user.displayName || "User",
+            avatarUrl: user.photoURL 
+          })
+        }).catch(console.error);
+      });
     }
   }, [user, loading, router]);
 

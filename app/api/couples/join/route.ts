@@ -44,13 +44,13 @@ export const POST = withAuth(async (req: NextRequest, user: UserContext) => {
     if (couple.status === 'active') {
       return Response.json({ error: 'This couple is already full' }, { status: 409 });
     }
-    if (couple.partner_a_id === user.uid) {
+    if (couple.partner_a_id === user.dbId) {
       return Response.json({ error: 'You cannot join your own couple link' }, { status: 400 });
     }
 
     // Set partner_b and activate the couple
     const { data: updatedCouple, error: updateCoupleError } = await couplesQuery
-      .update({ partner_b_id: user.uid, status: 'active' })
+      .update({ partner_b_id: user.dbId, status: 'active' })
       .eq('id', couple.id)
       .select('id, invite_code, status, partner_a_id, partner_b_id, created_at')
       .single();
@@ -60,7 +60,7 @@ export const POST = withAuth(async (req: NextRequest, user: UserContext) => {
     // Link both profiles to this couple
     const profilesQuery = supabaseAdmin.from('profiles') as any;
     const [{ error: e1 }, { error: e2 }] = await Promise.all([
-      profilesQuery.update({ couple_id: couple.id }).eq('id', user.uid),
+      profilesQuery.update({ couple_id: couple.id }).eq('id', user.dbId),
       profilesQuery.update({ couple_id: couple.id }).eq('id', couple.partner_a_id),
     ]);
 
@@ -70,9 +70,9 @@ export const POST = withAuth(async (req: NextRequest, user: UserContext) => {
     // 5. Sync to Firestore
     await Promise.all([
       syncProfileToFirestore(user.uid, { coupleId: couple.id }),
-      syncProfileToFirestore(couple.partner_a_id, { coupleId: couple.id }),
+      // Note: Partner A's Firestore doc will sync when they next login or via background process
       syncCoupleToFirestore(couple.id, { 
-        partnerBId: user.uid, 
+        partnerBId: user.dbId, 
         status: 'active' 
       })
     ]);

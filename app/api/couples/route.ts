@@ -35,7 +35,7 @@ export const POST = withAuth(async (req: NextRequest, user: UserContext) => {
     // 1. Check if we already have a pending couple (fix for potential race conditions/orphaned rows)
     const { data: existing } = await couplesQuery
       .select('id, invite_code, status, created_at')
-      .eq('partner_a_id', user.uid)
+      .eq('partner_a_id', user.dbId)
       .eq('status', 'pending')
       .maybeSingle();
 
@@ -43,14 +43,14 @@ export const POST = withAuth(async (req: NextRequest, user: UserContext) => {
       // Ensure profile is linked (self-healing)
       await (supabaseAdmin.from('profiles') as any)
         .update({ couple_id: existing.id })
-        .eq('id', user.uid);
+        .eq('id', user.dbId);
 
       // Sync to Firestore
       await Promise.all([
-        syncProfileToFirestore(user.uid, { coupleId: existing.id }),
+        syncProfileToFirestore(user.dbId, { coupleId: existing.id }),
         syncCoupleToFirestore(existing.id, { 
           inviteCode: existing.invite_code, 
-          partnerAId: user.uid,
+          partnerAId: user.dbId,
           status: existing.status 
         })
       ]);
@@ -61,7 +61,7 @@ export const POST = withAuth(async (req: NextRequest, user: UserContext) => {
           inviteCode: existing.invite_code,
           status: existing.status,
           createdAt: existing.created_at,
-          partnerAId: user.uid,
+          partnerAId: user.dbId,
           partnerBId: null,
         },
       }, { status: 200 });
@@ -72,7 +72,7 @@ export const POST = withAuth(async (req: NextRequest, user: UserContext) => {
     const { data: couple, error: createError } = await couplesQuery
       .insert({
         invite_code: inviteCode,
-        partner_a_id: user.uid,
+        partner_a_id: user.dbId,
         status: 'pending',
       })
       .select('id, invite_code, status, created_at')
@@ -84,7 +84,7 @@ export const POST = withAuth(async (req: NextRequest, user: UserContext) => {
     const profilesQuery = supabaseAdmin.from('profiles') as any;
     const { error: profileError } = await profilesQuery
       .update({ couple_id: couple.id })
-      .eq('id', user.uid);
+      .eq('id', user.dbId);
 
     if (profileError) {
       console.error('[COUPLES] Profile link error (non-fatal):', profileError);
@@ -92,10 +92,10 @@ export const POST = withAuth(async (req: NextRequest, user: UserContext) => {
 
     // 4. Sync to Firestore
     await Promise.all([
-      syncProfileToFirestore(user.uid, { coupleId: couple.id }),
+      syncProfileToFirestore(user.dbId, { coupleId: couple.id }),
       syncCoupleToFirestore(couple.id, { 
         inviteCode: couple.invite_code, 
-        partnerAId: user.uid,
+        partnerAId: user.dbId,
         status: couple.status 
       })
     ]);
@@ -106,7 +106,7 @@ export const POST = withAuth(async (req: NextRequest, user: UserContext) => {
         inviteCode: couple.invite_code,
         status: couple.status,
         createdAt: couple.created_at,
-        partnerAId: user.uid,
+        partnerAId: user.dbId,
         partnerBId: null,
       },
     }, { status: 201 });
@@ -144,7 +144,7 @@ export const GET = withAuth(async (_req: NextRequest, user: UserContext) => {
     // This handles cases where the profile link is missing or token is stale
     const { data: pending, error: pendingError } = await query
       .select('id, invite_code, status, created_at, partner_a_id, partner_b_id')
-      .eq('partner_a_id', user.uid)
+      .eq('partner_a_id', user.dbId)
       .eq('status', 'pending')
       .maybeSingle();
 
@@ -155,7 +155,7 @@ export const GET = withAuth(async (_req: NextRequest, user: UserContext) => {
           invite_code: pending.invite_code,
           status: pending.status,
           created_at: pending.created_at,
-          partner_a: { id: user.uid }, // minimal profile
+          partner_a: { id: user.dbId }, // minimal profile
           partner_b: null
         }
       });

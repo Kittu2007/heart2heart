@@ -1,6 +1,7 @@
 import { NextRequest } from 'next/server';
 import { supabaseAdmin } from '../supabase/admin';
 import { verifyFirebaseToken } from './verify-token';
+import { toDbId } from './id-mapper';
 
 export class AuthError extends Error {
   constructor(
@@ -13,7 +14,8 @@ export class AuthError extends Error {
 }
 
 export type UserContext = {
-  uid: string;
+  uid: string;       // Original Firebase UID
+  dbId: string;      // Mapped UUID for Supabase
   name: string;
   coupleId: string | null;
   onboardingDone: boolean;
@@ -25,18 +27,18 @@ export async function getAuthUser(req: NextRequest): Promise<UserContext> {
   
   if (!result.decoded) {
     console.error(`[Auth] Verification failed for ${req.url}: ${result.error}`);
-    // Provide the error detail in the message so the frontend can display it
     throw new AuthError(result.error || 'Unauthorized: Invalid token', result.code || 401);
   }
 
   const decodedToken = result.decoded;
   const firebaseUid = decodedToken.uid;
+  const dbId = toDbId(firebaseUid);
 
-  // 1. Try to fetch existing profile
+  // 1. Try to fetch existing profile using mapped dbId
   const { data: profile, error } = await supabaseAdmin
     .from('profiles')
     .select('id, name, couple_id, onboarding_done, comfort_level')
-    .eq('id', firebaseUid)
+    .eq('id', dbId)
     .maybeSingle();
 
   if (error) {
@@ -46,7 +48,8 @@ export async function getAuthUser(req: NextRequest): Promise<UserContext> {
 
   if (profile) {
     return {
-      uid: profile.id,
+      uid: firebaseUid,
+      dbId: profile.id,
       name: profile.name,
       coupleId: profile.couple_id,
       onboardingDone: profile.onboarding_done,
@@ -54,34 +57,27 @@ export async function getAuthUser(req: NextRequest): Promise<UserContext> {
     };
   }
 
-  // 2. Profile missing, auto-create it (idempotent upsert)
-  console.log(`[Auth] Profile missing for ${firebaseUid}, auto-creating...`);
+  // 2. Profile missing, auto-create it using mapped dbId
+  console.log(`[Auth] Profile missing for ${firebaseUid} (DB ID: ${dbId}), auto-creating...`);
   
   const insertPayload = {
-    id: firebaseUid,
+    id: dbId,
     name: decodedToken.name || decodedToken.email?.split('@')[0] || 'User',
     avatar_url: decodedToken.picture || null,
     onboarding_done: false,
     comfort_level: 3,
   };
 
-  // Use upsert with ignoreDuplicates: true. 
-  // This is the most idempotent way to "ensure exists".
   const { data: newProfile, error: upsertError } = await supabaseAdmin
     .from('profiles')
     .upsert(insertPayload, { onConflict: 'id', ignoreDuplicates: true })
     .select('id, name, couple_id, onboarding_done, comfort_level')
     .maybeSingle();
 
-  if (upsertError) {
-    console.error('[Auth] Failed to upsert profile:', upsertError);
-    // Even if upsert fails (e.g. unique constraint on something else), 
-    // we should try one last select to see if the record exists.
-  }
-
   if (newProfile) {
     return {
-      uid: newProfile.id,
+      uid: firebaseUid,
+      dbId: newProfile.id,
       name: newProfile.name,
       coupleId: newProfile.couple_id,
       onboardingDone: newProfile.onboarding_done,
@@ -93,12 +89,13 @@ export async function getAuthUser(req: NextRequest): Promise<UserContext> {
   const { data: finalProfile, error: finalError } = await supabaseAdmin
     .from('profiles')
     .select('id, name, couple_id, onboarding_done, comfort_level')
-    .eq('id', firebaseUid)
+    .eq('id', dbId)
     .maybeSingle();
 
   if (finalProfile) {
     return {
-      uid: finalProfile.id,
+      uid: firebaseUid,
+      dbId: finalProfile.id,
       name: finalProfile.name,
       coupleId: finalProfile.couple_id,
       onboardingDone: finalProfile.onboarding_done,

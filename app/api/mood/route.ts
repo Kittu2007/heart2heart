@@ -36,7 +36,7 @@ export const POST = withAuth(async (req: NextRequest, user: UserContext) => {
     const query = supabaseAdmin.from('mood_checkins') as any;
     const { data: checkin, error } = await query
       .insert({
-        user_id: user.uid,
+        user_id: user.dbId,
         couple_id: user.coupleId,
         mood,
         share_with_partner: shareWithPartner,
@@ -54,7 +54,7 @@ export const POST = withAuth(async (req: NextRequest, user: UserContext) => {
         shareWithPartner: checkin.share_with_partner,
         note: checkin.note,
         createdAt: checkin.created_at,
-        userId: user.uid,
+        userId: user.dbId,
       },
     }, { status: 201 });
   } catch (error) {
@@ -86,14 +86,14 @@ export const GET = withAuth(async (req: NextRequest, user: UserContext) => {
     }
 
     const partnerId =
-      couple.partner_a_id === user.uid ? couple.partner_b_id : couple.partner_a_id;
+      couple.partner_a_id === user.dbId ? couple.partner_b_id : couple.partner_a_id;
 
     const moodQuery = supabaseAdmin.from('mood_checkins') as any;
 
     // Own moods — all of them
     const { data: ownMoods, error: ownError } = await moodQuery
       .select('id, mood, share_with_partner, note, created_at')
-      .eq('user_id', user.uid)
+      .eq('user_id', user.dbId)
       .eq('couple_id', user.coupleId)
       .order('created_at', { ascending: false })
       .range(offset, offset + limit - 1);

@@ -1,6 +1,7 @@
 import { supabaseAdmin } from '../supabase/admin';
 import type { Database } from '../supabase/database.types';
 import { syncProfileToFirestore, syncCoupleToFirestore } from './firestore-sync';
+import { toDbId } from './id-mapper';
 
 type Profile = Database['public']['Tables']['profiles']['Row'];
 type ProfileInsert = Database['public']['Tables']['profiles']['Insert'];
@@ -12,36 +13,33 @@ export async function syncFirebaseUserToSupabase(
     avatarUrl?: string | null;
   }
 ): Promise<{ profile: Profile | null; error: unknown }> {
-  console.log('[SYNC] input uid:', firebaseUid, '| name:', userData.name);
+  const dbId = toDbId(firebaseUid);
+  console.log('[SYNC] firebase uid:', firebaseUid, '| dbId:', dbId, '| name:', userData.name);
 
   const payload = {
-    id: firebaseUid,
+    id: dbId,
     name: userData.name,
     avatar_url: userData.avatarUrl ?? null,
-    // Note: couple_id, onboarding_done, and comfort_level are NOT included here
-    // to prevent overwriting existing progress during sync.
   } as ProfileInsert;
-
-  console.log('[SYNC] upsert payload:', JSON.stringify(payload));
 
   const query = supabaseAdmin.from('profiles') as any;
   const { data: profile, error } = await query
-    .upsert(payload, { onConflict: 'id', ignoreDuplicates: false }) // false because we DO want to update name/avatar if they changed in Firebase
+    .upsert(payload, { onConflict: 'id', ignoreDuplicates: false })
     .select()
     .maybeSingle();
 
   if (error || !profile) {
     console.error('[SYNC ERROR] Supabase error:', JSON.stringify(error));
     
-    // Final fallback: try to fetch even if upsert errored (e.g. race condition)
+    // Final fallback: try to fetch even if upsert errored
     const { data: retry } = await supabaseAdmin
       .from('profiles')
       .select('*')
-      .eq('id', firebaseUid)
+      .eq('id', dbId)
       .maybeSingle();
       
     if (retry) {
-      // Sync basic info to Firestore even on retry
+      // Sync to Firestore using ORIGINAL firebaseUid for client compatibility
       await syncProfileToFirestore(firebaseUid, {
         name: userData.name,
         coupleId: (retry as any).couple_id,
@@ -53,14 +51,14 @@ export async function syncFirebaseUserToSupabase(
     return { profile: null, error: error || new Error('Failed to fetch or create profile') };
   }
 
-  // Sync to Firestore
+  // Sync to Firestore using ORIGINAL firebaseUid
   await syncProfileToFirestore(firebaseUid, {
     name: userData.name,
     coupleId: profile.couple_id,
     onboardingDone: profile.onboarding_done
   });
 
-  console.log('[SYNC] success, profile id:', profile?.id);
+  console.log('[SYNC] success, profile dbId:', profile?.id);
 
   // EAGER CODE GENERATION: Assign a permanent code if they don't have one
   if (profile && !profile.couple_id) {
@@ -69,7 +67,7 @@ export async function syncFirebaseUserToSupabase(
       const { data: existing } = await supabaseAdmin
         .from('couples')
         .select('id, invite_code, status, partner_a_id, partner_b_id')
-        .or(`partner_a_id.eq.${profile.id},partner_b_id.eq.${profile.id}`)
+        .or(`partner_a_id.eq.${dbId},partner_b_id.eq.${dbId}`)
         .maybeSingle();
 
       if (existing) {
@@ -77,12 +75,11 @@ export async function syncFirebaseUserToSupabase(
         const { data: updated } = await supabaseAdmin
           .from('profiles')
           .update({ couple_id: existing.id })
-          .eq('id', profile.id)
+          .eq('id', dbId)
           .select()
           .single();
         if (updated) profile.couple_id = updated.couple_id;
 
-        // Sync to Firestore
         await syncCoupleToFirestore(existing.id, {
           inviteCode: existing.invite_code,
           partnerAId: existing.partner_a_id,
@@ -94,7 +91,7 @@ export async function syncFirebaseUserToSupabase(
         const inviteCode = Math.random().toString(36).substring(2, 8).toUpperCase();
         const { data: newCouple } = await (supabaseAdmin.from('couples') as any)
           .insert({
-            partner_a_id: profile.id,
+            partner_a_id: dbId,
             invite_code: inviteCode,
             status: 'pending'
           })
@@ -105,12 +102,11 @@ export async function syncFirebaseUserToSupabase(
           const { data: updatedProfile } = await supabaseAdmin
             .from('profiles')
             .update({ couple_id: newCouple.id })
-            .eq('id', profile.id)
+            .eq('id', dbId)
             .select()
             .single();
           if (updatedProfile) profile.couple_id = updatedProfile.couple_id;
 
-          // Sync new couple to Firestore
           await syncCoupleToFirestore(newCouple.id, {
             inviteCode: newCouple.invite_code,
             partnerAId: newCouple.partner_a_id,
@@ -131,9 +127,10 @@ export async function ensureProfileExists(
   name: string
 ): Promise<{ exists: boolean; error: Error | null }> {
   try {
+    const dbId = toDbId(firebaseUid);
     const insertQuery = supabaseAdmin.from('profiles') as any;
     const { error } = await insertQuery.upsert({
-      id: firebaseUid,
+      id: dbId,
       name,
     }, { onConflict: 'id', ignoreDuplicates: true });
 

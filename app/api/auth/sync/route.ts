@@ -2,18 +2,27 @@ import { NextRequest } from 'next/server';
 import { z } from 'zod';
 import { verifyFirebaseToken } from '@/lib/auth/verify-token';
 import { syncFirebaseUserToSupabase } from '@/lib/auth/sync';
+import { syncProfileToFirestore } from '@/lib/auth/firestore-sync';
 
 const SyncSchema = z.object({
   name: z.string().min(1).max(100).trim(),
   avatarUrl: z.string().url().nullable().optional(),
+  onboardingData: z.object({
+    loveLanguage: z.string().nullable().optional(),
+    communicationStyle: z.string().nullable().optional(),
+    comfortLevel: z.number().optional(),
+    onboardingDone: z.boolean().optional(),
+  }).optional(),
 });
 
 export async function POST(req: NextRequest) {
-  // Verify Firebase token — uid comes from the token, not the body
-  const firebaseUid = await verifyFirebaseToken(req);
-  if (!firebaseUid) {
-    return Response.json({ error: 'Unauthorized: Invalid or missing token' }, { status: 401 });
+  // Verify Firebase token
+  const result = await verifyFirebaseToken(req);
+  if (!result.decoded) {
+    return Response.json({ error: result.error || 'Unauthorized: Invalid or missing token' }, { status: result.code || 401 });
   }
+
+  const firebaseUid = result.decoded.uid;
 
   let body: unknown;
   try {
@@ -30,15 +39,24 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  const { name, avatarUrl } = parsed.data;
+  const { name, avatarUrl, onboardingData } = parsed.data;
   const { profile, error } = await syncFirebaseUserToSupabase(firebaseUid, {
     name,
     avatarUrl: avatarUrl ?? null,
+    ...onboardingData, // Spread onboarding data if present
   });
 
   if (error || !profile) {
     return Response.json({ error: 'Failed to sync user profile', detail: JSON.parse(JSON.stringify(error ?? 'no profile returned')) }, { status: 500 });
   }
+
+  // Sync to Firestore for real-time frontend features
+  await syncProfileToFirestore(firebaseUid, { 
+    name: profile.name,
+    coupleId: profile.couple_id,
+    onboardingDone: profile.onboarding_done,
+    dbId: profile.id
+  });
 
   return Response.json({
     profile: {

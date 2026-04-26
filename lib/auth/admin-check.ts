@@ -13,8 +13,12 @@ export class AdminError extends Error {
 }
 
 export async function verifyAdmin(req: NextRequest) {
-  const firebaseUid = await verifyFirebaseToken(req);
-  if (!firebaseUid) throw new AdminError('Unauthorized: Invalid or missing token', 401);
+  const result = await verifyFirebaseToken(req);
+  if (!result.decoded) {
+    throw new AdminError(result.error || 'Unauthorized: Invalid or missing token', result.code || 401);
+  }
+
+  const firebaseUid = result.decoded.uid;
 
   const query = supabaseAdmin.from('profiles') as any;
   const { data: profile, error } = await query

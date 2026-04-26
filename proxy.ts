@@ -6,7 +6,7 @@ import { NextRequest, NextResponse } from 'next/server';
  * Actual Firebase token verification happens in Node.js API route handlers
  * via lib/auth/verify-token.ts.
  */
-export function middleware(req: NextRequest) {
+export function proxy(req: NextRequest) {
   const requestHeaders = new Headers(req.headers);
 
   // Forward raw Bearer token so route handlers can verify it server-side

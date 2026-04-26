@@ -10,12 +10,12 @@ const SyncSchema = z.object({
 
 export async function POST(req: NextRequest) {
   // Verify Firebase token
-  const decodedToken = await verifyFirebaseToken(req);
-  if (!decodedToken) {
-    return Response.json({ error: 'Unauthorized: Invalid or missing token' }, { status: 401 });
+  const result = await verifyFirebaseToken(req);
+  if (!result.decoded) {
+    return Response.json({ error: result.error || 'Unauthorized: Invalid or missing token' }, { status: result.code || 401 });
   }
 
-  const firebaseUid = decodedToken.uid;
+  const firebaseUid = result.decoded.uid;
 
   let body: unknown;
   try {

@@ -5,7 +5,7 @@ import { onSnapshot, doc, setDoc, updateDoc } from "firebase/firestore";
 import { db, auth } from "@/utils/firebase/client";
 import TopNavBar from "@/app/components/dashboard/TopNavBar";
 import { Settings, User, Heart, Bell, LogOut, ChevronRight } from "lucide-react";
-import { signOut, updateProfile as updateAuthProfile } from "firebase/auth";
+import { signOut, updateProfile as updateAuthProfile, onAuthStateChanged } from "firebase/auth";
 import { useRouter } from "next/navigation";
 import { playSound, SoundType } from "@/utils/sound";
 
@@ -15,19 +15,21 @@ export default function SettingsPage() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    const user = auth.currentUser;
-    if (user) {
-      setupListeners(user);
-    }
+    const unsubscribe = onAuthStateChanged(auth, (user) => {
+      if (!user) {
+        router.push("/login");
+        return;
+      }
 
-    function setupListeners(u: any) {
-      const unsub = onSnapshot(doc(db, "profiles", u.uid), (docSnap) => {
+      // Direct doc listener (no query needed — we know the doc ID)
+      const unsub = onSnapshot(doc(db, "profiles", user.uid), (docSnap) => {
         if (docSnap.exists()) {
           setProfile(docSnap.data());
         } else {
+          // Profile doesn't exist yet — show defaults from auth
           setProfile({
-            displayName: u.displayName || "User",
-            email: u.email || "",
+            displayName: user.displayName || "User",
+            email: user.email || "",
             preferences: {
               notifications: true,
               sound: true,
@@ -36,18 +38,11 @@ export default function SettingsPage() {
         }
         setLoading(false);
       });
-      return unsub;
-    }
 
-    const unsubscribeAuth = auth.onAuthStateChanged((u) => {
-      if (!u) {
-        router.push("/login");
-        return;
-      }
-      setupListeners(u);
+      return () => unsub();
     });
 
-    return () => unsubscribeAuth();
+    return () => unsubscribe();
   }, [router]);
 
   const updateFirebaseProfile = async (updates: any) => {

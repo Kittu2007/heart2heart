@@ -15,7 +15,7 @@ import {
   where,
   orderBy,
   limit,
-  getDocs,
+  getDoc,
   Timestamp
 } from "firebase/firestore";
 import TopNavBar from "@/app/components/dashboard/TopNavBar";
@@ -71,40 +71,41 @@ export default function DashboardPage() {
   const [connectionScore, setConnectionScore] = useState(0);
   const [reflection, setReflection] = useState("");
 
-  // Auth and Data Fetching
+  // Auth and Profile listener
   useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, async (user) => {
+    const unsubscribe = onAuthStateChanged(auth, (user) => {
       if (!user) {
         router.push("/login");
       } else {
         setCurrentUser(user);
-        
-        // 1. Listen for user's profile and couple link
-        const profileUnsub = onSnapshot(doc(db, "profiles", user.uid), (docSnap) => {
-          if (docSnap.exists()) {
-            const data = docSnap.data();
-            if (data.coupleId) {
-              setCoupleId(data.coupleId);
-            }
-          }
-        });
-
         setIsInitialLoading(false);
-        return () => profileUnsub();
+      }
+    });
+
+    return () => unsubscribe();
+  }, [router]);
+
+  // Profile listener — separate effect so it runs once user is set
+  useEffect(() => {
+    if (!currentUser) return;
+
+    const profileUnsub = onSnapshot(doc(db, "profiles", currentUser.uid), (docSnap) => {
+      if (docSnap.exists()) {
+        const data = docSnap.data();
+        if (data.coupleId) {
+          setCoupleId(data.coupleId);
+        }
       }
     });
 
     // Presence update
     const updatePresence = async () => {
-      const user = auth.currentUser;
-      if (user) {
-        try {
-          await updateDoc(doc(db, "profiles", user.uid), {
-            lastSeen: serverTimestamp()
-          });
-        } catch (e) {
-          // Ignore
-        }
+      try {
+        await updateDoc(doc(db, "profiles", currentUser.uid), {
+          lastSeen: serverTimestamp()
+        });
+      } catch (e) {
+        // Ignore — profile may not exist yet
       }
     };
 
@@ -112,106 +113,117 @@ export default function DashboardPage() {
     const presenceInterval = setInterval(updatePresence, 30000);
 
     return () => {
-      unsubscribe();
+      profileUnsub();
       clearInterval(presenceInterval);
     };
-  }, [router]);
+  }, [currentUser]);
 
-  // 2. Real-time Partner & Couple Sync
+  // Partner & Couple Sync — only runs when coupleId is available
   useEffect(() => {
     if (!currentUser || !coupleId) return;
 
     setIsPartnerLoading(true);
+    const cleanups: (() => void)[] = [];
 
     // Listen for the couple document
     const coupleUnsub = onSnapshot(doc(db, "couples", coupleId), async (docSnap) => {
-      if (docSnap.exists()) {
-        const data = docSnap.data();
-        const partnerId = data.partner_a_id === currentUser.uid ? data.partner_b_id : data.partner_a_id;
-        
-        if (partnerId) {
-          // Fetch partner profile name
-          const partnerProfileSnap = await getDocs(query(collection(db, "profiles"), where("__name__", "==", partnerId)));
-          const partnerData = !partnerProfileSnap.empty ? partnerProfileSnap.docs[0].data() : null;
-          const partnerName = partnerData?.displayName || "Partner";
-          const partnerPhoto = partnerData?.photoURL;
-
-          setPartner({
-            name: partnerName,
-            photoUrl: partnerPhoto,
-            isOnline: false,
-            taskCompleted: false,
-          });
-          setIsPartnerLoading(false);
-
-          // Listen for partner's today completion
-          const today = new Date();
-          today.setHours(0,0,0,0);
-          
-          const q = query(
-            collection(db, "completed_tasks"),
-            where("userId", "==", partnerId),
-            where("completedAt", ">=", Timestamp.fromDate(today))
-          );
-          
-          const taskUnsub = onSnapshot(q, (snapshot) => {
-            setPartner(prev => prev ? ({
-              ...prev,
-              taskCompleted: !snapshot.empty
-            }) : null);
-          });
-
-          // Listen for partner's online status
-          const profileUnsub = onSnapshot(doc(db, "profiles", partnerId), (docSnap) => {
-            if (docSnap.exists()) {
-              const profileData = docSnap.data();
-              const lastSeen = profileData.lastSeen?.toDate();
-              const isOnline = lastSeen ? (new Date().getTime() - lastSeen.getTime() < 60000) : false; // Within 1 min
-              
-              setPartner(prev => prev ? ({
-                ...prev,
-                isOnline,
-                lastSeen: lastSeen?.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-              }) : null);
-            }
-          });
-
-          // Listen for partner's mood
-          const moodQ = query(
-            collection(db, "mood_checkins"),
-            where("userId", "==", partnerId),
-            where("shareWithPartner", "==", true),
-            orderBy("timestamp", "desc"),
-            limit(1)
-          );
-
-          const moodUnsub = onSnapshot(moodQ, (snapshot) => {
-            if (!snapshot.empty) {
-              const moodData = snapshot.docs[0].data();
-              setPartner(prev => prev ? ({
-                ...prev,
-                mood: moodData.mood
-              }) : null);
-            }
-          });
-
-          return () => {
-            taskUnsub();
-            profileUnsub();
-            moodUnsub();
-          };
-        }
+      if (!docSnap.exists()) {
+        setIsPartnerLoading(false);
+        return;
       }
-    });
+      
+      const data = docSnap.data();
+      const partnerId = data.partner_a_id === currentUser.uid ? data.partner_b_id : data.partner_a_id;
+      
+      if (!partnerId) {
+        setIsPartnerLoading(false);
+        return;
+      }
 
-    // 3. Dynamic Connection Score Calculation (Real-time)
+      // Direct doc lookup instead of query (much faster)
+      try {
+        const partnerDoc = await getDoc(doc(db, "profiles", partnerId));
+        const partnerData = partnerDoc.exists() ? partnerDoc.data() : null;
+        
+        setPartner({
+          name: partnerData?.displayName || "Partner",
+          photoUrl: partnerData?.photoURL,
+          isOnline: false,
+          taskCompleted: false,
+        });
+      } catch {
+        setPartner({
+          name: "Partner",
+          isOnline: false,
+          taskCompleted: false,
+        });
+      }
+      setIsPartnerLoading(false);
+
+      // Listen for partner's online status (single-field, no index needed)
+      const profileUnsub = onSnapshot(doc(db, "profiles", partnerId), (snap) => {
+        if (snap.exists()) {
+          const profileData = snap.data();
+          const lastSeen = profileData.lastSeen?.toDate();
+          const isOnline = lastSeen ? (new Date().getTime() - lastSeen.getTime() < 60000) : false;
+          
+          setPartner(prev => prev ? ({
+            ...prev,
+            isOnline,
+            lastSeen: lastSeen?.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+          }) : null);
+        }
+      });
+      cleanups.push(profileUnsub);
+
+      // Listen for partner's task completion (single-field query + client filter)
+      const taskQ = query(
+        collection(db, "completed_tasks"),
+        where("userId", "==", partnerId)
+      );
+      const taskUnsub = onSnapshot(taskQ, (snapshot) => {
+        const today = new Date();
+        today.setHours(0, 0, 0, 0);
+        const hasToday = snapshot.docs.some(d => {
+          const completedAt = d.data().completedAt?.toDate();
+          return completedAt && completedAt >= today;
+        });
+        setPartner(prev => prev ? ({ ...prev, taskCompleted: hasToday }) : null);
+      }, () => {/* ignore errors */});
+      cleanups.push(taskUnsub);
+
+      // Listen for partner's mood (single-field query + client filter)
+      const moodQ = query(
+        collection(db, "mood_checkins"),
+        where("userId", "==", partnerId)
+      );
+      const moodUnsub = onSnapshot(moodQ, (snapshot) => {
+        // Find the most recent shared mood client-side
+        let latest: any = null;
+        let latestTime = 0;
+        snapshot.docs.forEach(d => {
+          const data = d.data();
+          if (data.shareWithPartner) {
+            const t = data.timestamp?.toDate()?.getTime() || 0;
+            if (t > latestTime) {
+              latestTime = t;
+              latest = data;
+            }
+          }
+        });
+        if (latest) {
+          setPartner(prev => prev ? ({ ...prev, mood: latest.mood }) : null);
+        }
+      }, () => {/* ignore errors */});
+      cleanups.push(moodUnsub);
+    });
+    cleanups.push(coupleUnsub);
+
+    // Connection Score — single-field query + client sort
     const feedbackQ = query(
       collection(db, "feedback"), 
-      where("coupleId", "==", coupleId),
-      orderBy("submittedAt", "desc"),
-      limit(20)
+      where("coupleId", "==", coupleId)
     );
-
     const feedbackUnsub = onSnapshot(feedbackQ, (snapshot) => {
       if (snapshot.empty) {
         setConnectionScore(0);
@@ -219,19 +231,23 @@ export default function DashboardPage() {
       }
 
       let totalRating = 0;
-      snapshot.forEach(doc => totalRating += doc.data().rating);
-      const avgRating = totalRating / snapshot.size;
+      // Sort by submittedAt descending, take top 20
+      const sorted = snapshot.docs
+        .map(d => d.data())
+        .sort((a, b) => (b.submittedAt?.toDate()?.getTime() || 0) - (a.submittedAt?.toDate()?.getTime() || 0))
+        .slice(0, 20);
+
+      sorted.forEach(d => totalRating += d.rating || 0);
+      const avgRating = totalRating / sorted.length;
       
-      const calculated = Math.min(100, Math.floor((avgRating / 5) * 80 + (snapshot.size * 2)));
+      const calculated = Math.min(100, Math.floor((avgRating / 5) * 80 + (sorted.length * 2)));
       setConnectionScore(calculated);
     }, () => {
       setConnectionScore(0);
     });
+    cleanups.push(feedbackUnsub);
 
-    return () => {
-      coupleUnsub();
-      feedbackUnsub();
-    };
+    return () => cleanups.forEach(fn => fn());
   }, [currentUser, coupleId]);
 
   // Handle task completion - opens feedback modal
@@ -269,8 +285,6 @@ export default function DashboardPage() {
   // Handle feedback submission
   const handleFeedbackSubmit = useCallback(async (feedback: Feedback) => {
     if (!currentUser) return;
-    
-
 
     try {
       const savePromise = addDoc(collection(db, "feedback"), {

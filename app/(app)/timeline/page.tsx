@@ -1,12 +1,12 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { collection, query, where, orderBy, onSnapshot, doc, getDocs } from "firebase/firestore";
+import { collection, query, where, onSnapshot, doc, getDoc } from "firebase/firestore";
 import { db, auth } from "@/utils/firebase/client";
 import TopNavBar from "@/app/components/dashboard/TopNavBar";
 import { History, Star, Calendar, MessageSquare } from "lucide-react";
 import { motion } from "framer-motion";
-
+import { onAuthStateChanged } from "firebase/auth";
 import { useRouter } from "next/navigation";
 
 export default function TimelinePage() {
@@ -16,17 +16,15 @@ export default function TimelinePage() {
   const [coupleId, setCoupleId] = useState<string | null>(null);
   const [partnerNames, setPartnerNames] = useState<Record<string, string>>({});
 
+  // Auth + profile listener
   useEffect(() => {
-    // 1. Initial Auth Check (Faster than waiting for onAuthStateChanged if already logged in)
-    const checkAuth = async () => {
-      const user = auth.currentUser;
-      if (user) {
-        setupListeners(user);
+    const unsubscribe = onAuthStateChanged(auth, (user) => {
+      if (!user) {
+        router.push("/login");
+        return;
       }
-    };
 
-    const setupListeners = (user: any) => {
-      // Listen for profile
+      // Listen for profile to get coupleId
       const profileUnsub = onSnapshot(doc(db, "profiles", user.uid), async (docSnap) => {
         if (docSnap.exists()) {
           const data = docSnap.data();
@@ -34,17 +32,30 @@ export default function TimelinePage() {
           setCoupleId(cid || null);
 
           if (cid) {
-            // Background fetch names
-            const coupleSnap = await getDocs(query(collection(db, "couples"), where("__name__", "==", cid)));
-            if (!coupleSnap.empty) {
-              const coupleData = coupleSnap.docs[0].data();
-              const ids = [coupleData.partner_a_id, coupleData.partner_b_id].filter(Boolean);
-              const namesMap: Record<string, string> = {};
-              for (const id of ids) {
-                const pSnap = await getDocs(query(collection(db, "profiles"), where("__name__", "==", id)));
-                if (!pSnap.empty) namesMap[id] = pSnap.docs[0].data().displayName || "Someone";
+            // Direct doc lookup for couple (not a query)
+            try {
+              const coupleDoc = await getDoc(doc(db, "couples", cid));
+              if (coupleDoc.exists()) {
+                const coupleData = coupleDoc.data();
+                const ids = [coupleData.partner_a_id, coupleData.partner_b_id].filter(Boolean);
+                const namesMap: Record<string, string> = {};
+                
+                // Parallel direct doc lookups instead of sequential queries
+                await Promise.all(ids.map(async (id: string) => {
+                  try {
+                    const profileDoc = await getDoc(doc(db, "profiles", id));
+                    if (profileDoc.exists()) {
+                      namesMap[id] = profileDoc.data().displayName || "Someone";
+                    }
+                  } catch {
+                    namesMap[id] = "Someone";
+                  }
+                }));
+                
+                setPartnerNames(namesMap);
               }
-              setPartnerNames(namesMap);
+            } catch (err) {
+              console.warn("Failed to fetch couple/partner names:", err);
             }
           } else {
             setLoading(false);
@@ -53,39 +64,34 @@ export default function TimelinePage() {
           setLoading(false);
         }
       });
-      return profileUnsub;
-    };
 
-    const unsubscribeAuth = auth.onAuthStateChanged((user) => {
-      if (!user) {
-        router.push("/login");
-        return;
-      }
-      setupListeners(user);
+      return () => profileUnsub();
     });
 
-    checkAuth();
-    return () => unsubscribeAuth();
+    return () => unsubscribe();
   }, [router]);
 
+  // Feedback listener — single-field query + client-side sort
   useEffect(() => {
     if (!coupleId) return;
 
     const q = query(
       collection(db, "feedback"),
-      where("coupleId", "==", coupleId),
-      orderBy("submittedAt", "desc")
+      where("coupleId", "==", coupleId)
     );
 
     const unsub = onSnapshot(q, (snapshot) => {
-      const docs = snapshot.docs.map(doc => ({
-        id: doc.id,
-        ...doc.data(),
-        submittedAt: doc.data().submittedAt?.toDate() || new Date(),
-      } as any));
+      const docs = snapshot.docs
+        .map(doc => ({
+          id: doc.id,
+          ...doc.data(),
+          submittedAt: doc.data().submittedAt?.toDate() || new Date(),
+        } as any))
+        .sort((a: any, b: any) => b.submittedAt.getTime() - a.submittedAt.getTime());
+      
       setActivities(docs);
       setLoading(false);
-    }, (error) => {
+    }, () => {
       setLoading(false);
     });
 
@@ -164,7 +170,7 @@ export default function TimelinePage() {
                   {activity.comment && (
                     <div className="bg-black/[0.02] rounded-xl p-4 flex gap-3 italic text-[#4a4c4b]">
                       <MessageSquare size={16} className="text-brand-rose/40 shrink-0 mt-1" />
-                      <p className="text-sm">"{activity.comment}"</p>
+                      <p className="text-sm">&quot;{activity.comment}&quot;</p>
                     </div>
                   )}
 

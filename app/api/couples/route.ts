@@ -2,6 +2,7 @@ import { NextRequest } from 'next/server';
 import { z } from 'zod';
 import { withAuth, UserContext } from '@/lib/auth/with-auth';
 import { supabaseAdmin } from '@/lib/supabase/admin';
+import { syncProfileToFirestore, syncCoupleToFirestore } from '@/lib/auth/firestore-sync';
 
 function generateInviteCode(): string {
   const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'; // no ambiguous chars
@@ -44,6 +45,16 @@ export const POST = withAuth(async (req: NextRequest, user: UserContext) => {
         .update({ couple_id: existing.id })
         .eq('id', user.uid);
 
+      // Sync to Firestore
+      await Promise.all([
+        syncProfileToFirestore(user.uid, { coupleId: existing.id }),
+        syncCoupleToFirestore(existing.id, { 
+          inviteCode: existing.invite_code, 
+          partnerAId: user.uid,
+          status: existing.status 
+        })
+      ]);
+
       return Response.json({
         couple: {
           id: existing.id,
@@ -78,6 +89,16 @@ export const POST = withAuth(async (req: NextRequest, user: UserContext) => {
     if (profileError) {
       console.error('[COUPLES] Profile link error (non-fatal):', profileError);
     }
+
+    // 4. Sync to Firestore
+    await Promise.all([
+      syncProfileToFirestore(user.uid, { coupleId: couple.id }),
+      syncCoupleToFirestore(couple.id, { 
+        inviteCode: couple.invite_code, 
+        partnerAId: user.uid,
+        status: couple.status 
+      })
+    ]);
 
     return Response.json({
       couple: {

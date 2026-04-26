@@ -2,6 +2,7 @@ import { NextRequest } from 'next/server';
 import { z } from 'zod';
 import { verifyFirebaseToken } from '@/lib/auth/verify-token';
 import { syncFirebaseUserToSupabase } from '@/lib/auth/sync';
+import { syncProfileToFirestore } from '@/lib/auth/firestore-sync';
 
 const SyncSchema = z.object({
   name: z.string().min(1).max(100).trim(),
@@ -41,6 +42,13 @@ export async function POST(req: NextRequest) {
   if (error || !profile) {
     return Response.json({ error: 'Failed to sync user profile', detail: JSON.parse(JSON.stringify(error ?? 'no profile returned')) }, { status: 500 });
   }
+
+  // Sync to Firestore for real-time frontend features
+  await syncProfileToFirestore(firebaseUid, { 
+    name: profile.name,
+    coupleId: profile.couple_id,
+    onboardingDone: profile.onboarding_done
+  });
 
   return Response.json({
     profile: {

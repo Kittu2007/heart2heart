@@ -1,33 +1,28 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect } from "react";
 import { useRouter } from "next/navigation";
-import { onAuthStateChanged } from "firebase/auth";
-import { auth } from "@/utils/firebase/client";
+import { useAuth } from "@/lib/contexts/auth-context";
 
 export default function AppLayout({ children }: { children: React.ReactNode }) {
   const router = useRouter();
-  const [isCheckingAuth, setIsCheckingAuth] = useState(true);
+  const { user, loading } = useAuth();
 
   useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, (user) => {
-      if (!user) {
-        router.push("/login");
-      } else {
-        setIsCheckingAuth(false);
-      }
-    });
+    if (!loading && !user) {
+      router.push("/login");
+    }
+  }, [user, loading, router]);
 
-    return () => unsubscribe();
-  }, [router]);
-
-  if (isCheckingAuth) {
+  if (loading) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-[#F9F9F7]">
         <div className="w-8 h-8 border-2 border-brand-rose/30 border-t-brand-rose rounded-full animate-spin" />
       </div>
     );
   }
+
+  if (!user) return null;
 
   return <>{children}</>;
 }

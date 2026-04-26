@@ -2,6 +2,7 @@ import { NextRequest } from 'next/server';
 import { z } from 'zod';
 import { withAuth, UserContext } from '@/lib/auth/with-auth';
 import { supabaseAdmin } from '@/lib/supabase/admin';
+import { syncProfileToFirestore, syncCoupleToFirestore } from '@/lib/auth/firestore-sync';
 
 const JoinSchema = z.object({
   inviteCode: z.string().trim().min(6).max(12).toUpperCase(),
@@ -65,6 +66,16 @@ export const POST = withAuth(async (req: NextRequest, user: UserContext) => {
 
     if (e1) throw e1;
     if (e2) throw e2;
+
+    // 5. Sync to Firestore
+    await Promise.all([
+      syncProfileToFirestore(user.uid, { coupleId: couple.id }),
+      syncProfileToFirestore(couple.partner_a_id, { coupleId: couple.id }),
+      syncCoupleToFirestore(couple.id, { 
+        partnerBId: user.uid, 
+        status: 'active' 
+      })
+    ]);
 
     return Response.json({
       couple: {

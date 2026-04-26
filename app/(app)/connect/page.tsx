@@ -5,7 +5,7 @@ import { useRouter } from 'next/navigation';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Copy, Check, Link as LinkIcon, HeartHandshake, Loader2, Heart, AlertCircle, RefreshCw } from 'lucide-react';
 import { auth } from '@/utils/firebase/client';
-import { onAuthStateChanged } from 'firebase/auth';
+import { useAuth } from '@/lib/contexts/auth-context';
 import { playSound, SoundType } from '@/utils/sound';
 
 /* ── Helper: authenticated fetch with timeout ── */
@@ -88,22 +88,25 @@ export default function ConnectPage() {
     }
   }, [router]);
 
-  // Auth check
-  useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, (user) => {
-      if (!user) {
-        router.push("/login");
-      } else if (!fetchAttempted.current) {
-        fetchAttempted.current = true;
-        setIsLoading(false);
-        fetchOrCreateCode();
-      } else {
-        setIsLoading(false);
-      }
-    });
+  const { user, loading: authLoading } = useAuth();
 
-    return () => unsubscribe();
-  }, [router, fetchOrCreateCode]);
+  // Auth check and initial fetch
+  useEffect(() => {
+    if (authLoading) return;
+
+    if (!user) {
+      router.push("/login");
+      return;
+    }
+
+    if (!fetchAttempted.current) {
+      fetchAttempted.current = true;
+      setIsLoading(false);
+      fetchOrCreateCode();
+    } else {
+      setIsLoading(false);
+    }
+  }, [user, authLoading, router, fetchOrCreateCode]);
 
   const handleCopyCode = async () => {
     try {

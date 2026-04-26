@@ -3,7 +3,8 @@
 import { useEffect, useState, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import { auth, db } from "@/utils/firebase/client";
-import { onAuthStateChanged, User } from "firebase/auth";
+import { User } from "firebase/auth";
+import { useAuth } from "@/lib/contexts/auth-context";
 import { 
   collection, 
   addDoc, 
@@ -43,9 +44,8 @@ interface Partner {
 
 export default function DashboardPage() {
   const router = useRouter();
-  const [isInitialLoading, setIsInitialLoading] = useState(true);
+  const { user: currentUser, loading: authLoading } = useAuth();
   const [isActionLoading, setIsActionLoading] = useState(false);
-  const [currentUser, setCurrentUser] = useState<User | null>(null);
 
   // Task state
   const [dailyTask, setDailyTask] = useState<Task>({
@@ -70,20 +70,6 @@ export default function DashboardPage() {
   const [coupleId, setCoupleId] = useState<string | null>(null);
   const [connectionScore, setConnectionScore] = useState(0);
   const [reflection, setReflection] = useState("");
-
-  // Auth and Profile listener
-  useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, (user) => {
-      if (!user) {
-        router.push("/login");
-      } else {
-        setCurrentUser(user);
-        setIsInitialLoading(false);
-      }
-    });
-
-    return () => unsubscribe();
-  }, [router]);
 
   // Profile listener — separate effect so it runs once user is set
   useEffect(() => {
@@ -376,7 +362,7 @@ export default function DashboardPage() {
     setDailyTask(newTask);
   }, []);
 
-  if (isInitialLoading) {
+  if (authLoading) {
     return (
       <div
         className="min-h-screen flex items-center justify-center"
@@ -386,6 +372,8 @@ export default function DashboardPage() {
       </div>
     );
   }
+
+  if (!currentUser) return null;
 
   return (
     <div

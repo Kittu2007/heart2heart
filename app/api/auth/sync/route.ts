@@ -55,7 +55,8 @@ export async function POST(req: NextRequest) {
     name: profile.name,
     coupleId: profile.couple_id,
     onboardingDone: profile.onboarding_done,
-    dbId: profile.id
+    dbId: profile.id,
+    comfortLevel: profile.comfort_level
   });
 
   return Response.json({

@@ -20,6 +20,7 @@ interface PartnerStatusProps {
   inviteCode?: string | null;
   currentUserTaskCompleted?: boolean;
   isLoading?: boolean;
+  coupleStatus?: string | null;
 }
 
 export default function PartnerStatus({
@@ -28,6 +29,7 @@ export default function PartnerStatus({
   inviteCode,
   currentUserTaskCompleted = false,
   isLoading = false,
+  coupleStatus,
 }: PartnerStatusProps) {
   const currentUserName = currentUser?.name || "You";
   const bothCompleted = currentUserTaskCompleted && partner?.taskCompleted;
@@ -47,44 +49,74 @@ export default function PartnerStatus({
   }
 
   if (!partner) {
+    const isPending = coupleStatus === 'pending';
+
     return (
       <div className="col-span-1 md:col-span-2 lg:col-span-1 bg-surface backdrop-blur-apple rounded-[24px] p-6 lg:p-8 shadow-apple-card hover:shadow-apple-card-hover transition-all duration-500 border border-black/5 flex flex-col group relative overflow-hidden">
         {/* Animated background decoration */}
         <div className="absolute top-0 right-0 -mr-16 -mt-16 w-64 h-64 bg-brand-rose/5 rounded-full blur-3xl group-hover:bg-brand-rose/10 transition-colors duration-700" />
-        
+
         <h3 className="text-lg font-semibold text-[#1a1c1b] mb-5 flex items-center gap-2 relative z-10">
           <User size={20} className="text-[#78716c]" />
           Partner Status
         </h3>
 
         <div className="flex flex-col items-center justify-center flex-grow py-4 relative z-10">
-          <div className="w-20 h-20 bg-brand-rose/10 rounded-full flex items-center justify-center mb-4 animate-pulse-slow">
-            <UserPlus size={32} className="text-brand-rose" />
-          </div>
-          
-          <h4 className="text-base font-bold text-[#1a1c1b] mb-2">No Partner Linked</h4>
-          
-          {inviteCode ? (
-            <div className="flex flex-col items-center gap-3 w-full mb-6 text-center">
-              <p className="text-[10px] uppercase tracking-widest text-[#78716c] font-black">Your Permanent Code</p>
-              <div className="bg-brand-rose/5 border border-brand-rose/20 px-6 py-4 rounded-2xl w-full">
-                <span className="text-2xl font-black tracking-[0.2em] text-brand-rose select-all">{inviteCode}</span>
+          {isPending ? (
+            <>
+              <div className="w-20 h-20 bg-amber-500/10 rounded-full flex items-center justify-center mb-4 animate-pulse-slow">
+                <Clock size={32} className="text-amber-500" />
               </div>
-              <p className="text-[10px] text-[#78716c] max-w-[180px]">Share this code with your partner to start your journey together.</p>
-            </div>
-          ) : (
-            <p className="text-xs text-[#78716c] text-center max-w-[200px] mb-6 leading-relaxed">
-              Connect with your partner to track your progress together and earn daily rewards.
-            </p>
-          )}
 
-          <Link 
-            href="/connect"
-            className="w-full py-3 px-4 bg-[#1a1c1b] text-white rounded-xl text-sm font-semibold flex items-center justify-center gap-2 hover:bg-black transition-all shadow-sm active:scale-[0.98] group/btn"
-          >
-            <LinkIcon size={16} className="group-hover/btn:rotate-12 transition-transform" />
-            {inviteCode ? "Connection Center" : "Connect Now"}
-          </Link>
+              <h4 className="text-base font-bold text-[#1a1c1b] mb-2">Waiting for Partner</h4>
+
+              <div className="flex flex-col items-center gap-3 w-full mb-6 text-center">
+                <p className="text-[10px] uppercase tracking-widest text-[#78716c] font-black">Your Permanent Code</p>
+                <div className="bg-amber-500/10 border border-amber-500/20 px-6 py-4 rounded-2xl w-full">
+                  <span className="text-2xl font-black tracking-[0.2em] text-amber-600 select-all">{inviteCode}</span>
+                </div>
+                <p className="text-[10px] text-[#78716c] max-w-[180px]">Share this code with your partner. Once they join, you'll be connected!</p>
+              </div>
+
+              <Link
+                href="/connect"
+                className="w-full py-3 px-4 bg-[#1a1c1b] text-white rounded-xl text-sm font-semibold flex items-center justify-center gap-2 hover:bg-black transition-all shadow-sm active:scale-[0.98] group/btn"
+              >
+                <LinkIcon size={16} className="group-hover/btn:rotate-12 transition-transform" />
+                Manage Connection
+              </Link>
+            </>
+          ) : (
+            <>
+              <div className="w-20 h-20 bg-brand-rose/10 rounded-full flex items-center justify-center mb-4 animate-pulse-slow">
+                <UserPlus size={32} className="text-brand-rose" />
+              </div>
+
+              <h4 className="text-base font-bold text-[#1a1c1b] mb-2">No Partner Linked</h4>
+
+              {inviteCode ? (
+                <div className="flex flex-col items-center gap-3 w-full mb-6 text-center">
+                  <p className="text-[10px] uppercase tracking-widest text-[#78716c] font-black">Your Permanent Code</p>
+                  <div className="bg-brand-rose/5 border border-brand-rose/20 px-6 py-4 rounded-2xl w-full">
+                    <span className="text-2xl font-black tracking-[0.2em] text-brand-rose select-all">{inviteCode}</span>
+                  </div>
+                  <p className="text-[10px] text-[#78716c] max-w-[180px]">Share this code with your partner to start your journey together.</p>
+                </div>
+              ) : (
+                <p className="text-xs text-[#78716c] text-center max-w-[200px] mb-6 leading-relaxed">
+                  Connect with your partner to track your progress together and earn daily rewards.
+                </p>
+              )}
+
+              <Link
+                href="/connect"
+                className="w-full py-3 px-4 bg-[#1a1c1b] text-white rounded-xl text-sm font-semibold flex items-center justify-center gap-2 hover:bg-black transition-all shadow-sm active:scale-[0.98] group/btn"
+              >
+                <LinkIcon size={16} className="group-hover/btn:rotate-12 transition-transform" />
+                {inviteCode ? "Connection Center" : "Connect Now"}
+              </Link>
+            </>
+          )}
         </div>
 
         <style jsx>{`

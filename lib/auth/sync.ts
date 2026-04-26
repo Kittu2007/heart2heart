@@ -72,7 +72,8 @@ export async function syncFirebaseUserToSupabase(
     dbId: dbId,
     inviteCode: (profile as any).invite_code || undefined,
     loveLanguage: userData.loveLanguage,
-    communicationStyle: userData.communicationStyle
+    communicationStyle: userData.communicationStyle,
+    comfortLevel: userData.comfortLevel
   });
 
   console.log('[SYNC] success, profile dbId:', profile?.id);

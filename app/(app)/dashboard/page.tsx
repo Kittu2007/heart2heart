@@ -27,6 +27,7 @@ import PreferencesList from "@/app/components/dashboard/PreferencesList";
 import PartnerStatus from "@/app/components/dashboard/PartnerStatus";
 import FeedbackModal from "@/app/components/dashboard/FeedbackModal";
 import { playSound, SoundType } from "@/utils/sound";
+import { HeartHandshake } from "lucide-react";
 
 interface Feedback {
   rating: number;
@@ -40,6 +41,7 @@ interface Partner {
   lastSeen?: string;
   taskCompleted: boolean;
   photoUrl?: string;
+  mood?: string;
 }
 
 export default function DashboardPage() {
@@ -72,6 +74,8 @@ export default function DashboardPage() {
   const [connectionScore, setConnectionScore] = useState(0);
   const [reflection, setReflection] = useState("");
   const [dbId, setDbId] = useState<string | null>(null);
+  const [showPartnerJoinedToast, setShowPartnerJoinedToast] = useState(false);
+  const [coupleStatus, setCoupleStatus] = useState<string | null>(null);
 
   // Profile listener — separate effect so it runs once user is set
   useEffect(() => {
@@ -118,46 +122,83 @@ export default function DashboardPage() {
 
     setIsPartnerLoading(true);
     const cleanups: (() => void)[] = [];
+    let partnerId: string | null = null;
 
     // Listen for the couple document
     const coupleUnsub = onSnapshot(doc(db, "couples", coupleId), async (docSnap) => {
       if (!docSnap.exists()) {
         setIsPartnerLoading(false);
+        setPartner(null);
         return;
       }
-      
+
       const data = docSnap.data();
       if (data?.inviteCode) {
         setInviteCode(data.inviteCode);
       }
-      
-      const partnerId = data?.partnerAId === dbId ? data?.partnerBId : data?.partnerAId;
-      
+
+      // Track status change to detect when partner joins
+      const newStatus = data?.status;
+      if (newStatus === 'active' && coupleStatus !== 'active') {
+        // Status just changed to active - partner has joined!
+        setShowPartnerJoinedToast(true);
+        playSound(SoundType.SUCCESS);
+        setTimeout(() => setShowPartnerJoinedToast(false), 5000);
+      }
+      setCoupleStatus(newStatus);
+
+      if (data?.inviteCode) {
+        setInviteCode(data.inviteCode);
+      }
+
+      // Determine partner ID based on current user's position
+      const currentUserId = dbId;
+      if (data?.partnerAId === currentUserId) {
+        partnerId = data?.partnerBId || null;
+      } else if (data?.partnerBId === currentUserId) {
+        partnerId = data?.partnerAId || null;
+      } else {
+        partnerId = data?.partnerAId || data?.partnerBId || null;
+      }
+
       if (!partnerId) {
+        // No partner yet - show pending state
         setIsPartnerLoading(false);
         return;
       }
 
+      // Initialize or update partner state with basic info
+      setPartner(prev => ({
+        name: prev?.name || "Partner",
+        isOnline: prev?.isOnline ?? false,
+        taskCompleted: prev?.taskCompleted ?? false,
+        photoUrl: prev?.photoUrl ?? undefined,
+        lastSeen: prev?.lastSeen ?? undefined,
+        mood: prev?.mood ?? undefined,
+      }));
+
+      setIsPartnerLoading(false);
+
       // Query for the partner profile by their dbId
       try {
         const partnerQuery = query(collection(db, "profiles"), where("dbId", "==", partnerId), limit(1));
-        const querySnap = await onSnapshot(partnerQuery, (snap) => {
+        const querySnap = onSnapshot(partnerQuery, (snap) => {
           if (!snap.empty) {
             const partnerData = snap.docs[0].data();
-            setPartner(prev => ({
-              ...prev,
-              name: partnerData?.displayName || "Partner",
-              photoUrl: partnerData?.photoURL,
-              isOnline: prev?.isOnline ?? false,
-              taskCompleted: prev?.taskCompleted ?? false,
-            }));
+            setPartner(prev => {
+              if (!prev) return null;
+              return {
+                ...prev,
+                name: partnerData?.displayName || partnerData?.name || prev.name,
+                photoUrl: partnerData?.photoURL || prev.photoUrl,
+              };
+            });
           }
         });
         cleanups.push(querySnap);
       } catch (e) {
         console.error("Partner lookup error:", e);
       }
-      setIsPartnerLoading(false);
 
       // Listen for partner's online status (single-field, no index needed)
       const profileUnsub = onSnapshot(doc(db, "profiles", partnerId), (snap) => {
@@ -165,12 +206,17 @@ export default function DashboardPage() {
           const profileData = snap.data();
           const lastSeen = profileData.lastSeen?.toDate();
           const isOnline = lastSeen ? (new Date().getTime() - lastSeen.getTime() < 60000) : false;
-          
-          setPartner(prev => prev ? ({
-            ...prev,
-            isOnline,
-            lastSeen: lastSeen?.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-          }) : null);
+
+          setPartner(prev => {
+            if (!prev) return null;
+            return {
+              ...prev,
+              isOnline,
+              lastSeen: lastSeen?.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+              name: profileData?.displayName || profileData?.name || prev.name,
+              photoUrl: profileData?.photoURL || prev.photoUrl,
+            };
+          });
         }
       });
       cleanups.push(profileUnsub);
@@ -187,7 +233,13 @@ export default function DashboardPage() {
           const completedAt = d.data().completedAt?.toDate();
           return completedAt && completedAt >= today;
         });
-        setPartner(prev => prev ? ({ ...prev, taskCompleted: hasToday }) : null);
+        setPartner(prev => {
+          if (!prev) return null;
+          return {
+            ...prev,
+            taskCompleted: hasToday,
+          };
+        });
       }, () => {/* ignore errors */});
       cleanups.push(taskUnsub);
 
@@ -211,7 +263,13 @@ export default function DashboardPage() {
           }
         });
         if (latest) {
-          setPartner(prev => prev ? ({ ...prev, mood: latest.mood }) : null);
+          setPartner(prev => {
+            if (!prev) return null;
+            return {
+              ...prev,
+              mood: latest.mood,
+            };
+          });
         }
       }, () => {/* ignore errors */});
       cleanups.push(moodUnsub);
@@ -422,6 +480,7 @@ export default function DashboardPage() {
             inviteCode={inviteCode}
             currentUserTaskCompleted={hasCompletedTask}
             isLoading={isPartnerLoading}
+            coupleStatus={coupleStatus}
           />
           <PreferencesList partnerName={partner?.name || "Partner"} coupleId={coupleId} />
         </section>
@@ -433,6 +492,21 @@ export default function DashboardPage() {
         onClose={() => setIsFeedbackModalOpen(false)}
         onSubmit={handleFeedbackSubmit}
       />
+
+      {/* Partner Joined Toast Notification */}
+      {showPartnerJoinedToast && (
+        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 animate-in slide-in-from-bottom-4 duration-500">
+          <div className="bg-[#1D1D1F] text-white px-6 py-4 rounded-2xl shadow-2xl flex items-center gap-3 border border-white/10">
+            <div className="w-8 h-8 bg-green-500/20 rounded-full flex items-center justify-center">
+              <HeartHandshake size={18} className="text-green-400" />
+            </div>
+            <div>
+              <p className="font-semibold text-sm">Partner Connected!</p>
+              <p className="text-xs text-white/70">You can now track your progress together</p>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

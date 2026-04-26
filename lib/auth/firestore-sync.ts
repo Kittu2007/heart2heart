@@ -8,6 +8,7 @@ export async function syncProfileToFirestore(uid: string, data: {
   inviteCode?: string;
   loveLanguage?: string | null;
   communicationStyle?: string | null;
+  comfortLevel?: number;
 }) {
   try {
     const profileRef = adminDb.collection('profiles').doc(uid);
@@ -19,6 +20,7 @@ export async function syncProfileToFirestore(uid: string, data: {
     if (data.inviteCode !== undefined) update.inviteCode = data.inviteCode;
     if (data.loveLanguage !== undefined) update.loveLanguage = data.loveLanguage;
     if (data.communicationStyle !== undefined) update.communicationStyle = data.communicationStyle;
+    if (data.comfortLevel !== undefined) update.comfortLevel = data.comfortLevel;
     
     await profileRef.set(update, { merge: true });
     console.log(`[FirestoreSync] Profile ${uid} updated with dbId: ${data.dbId}`);

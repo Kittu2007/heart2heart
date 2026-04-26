@@ -176,3 +176,31 @@ export const GET = withAuth(async (_req: NextRequest, user: UserContext) => {
     return Response.json({ error: 'Failed to fetch couple' }, { status: 500 });
   }
 });
+
+// DELETE /api/couples — disconnect/leave current couple
+export const DELETE = withAuth(async (_req: NextRequest, user: UserContext) => {
+  try {
+    if (!user.coupleId) {
+      // Even if they don't have a coupleId in context, try to clear it from Supabase just in case
+      await supabaseAdmin.from('profiles').update({ couple_id: null }).eq('id', user.dbId);
+      await syncProfileToFirestore(user.uid, { coupleId: null, dbId: user.dbId });
+      return Response.json({ message: 'Disconnected (no active couple found in session)' });
+    }
+
+    // 1. Clear profile's couple_id
+    const { error: profileError } = await supabaseAdmin
+      .from('profiles')
+      .update({ couple_id: null })
+      .eq('id', user.dbId);
+
+    if (profileError) throw profileError;
+
+    // 2. Sync to Firestore
+    await syncProfileToFirestore(user.uid, { coupleId: null, dbId: user.dbId });
+
+    return Response.json({ message: 'Disconnected successfully' });
+  } catch (error: any) {
+    console.error('Disconnect error:', error);
+    return Response.json({ error: 'Failed to disconnect', details: error?.message }, { status: 500 });
+  }
+});

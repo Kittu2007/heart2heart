@@ -1,12 +1,18 @@
 "use client";
 
-import { useState, FormEvent } from "react";
+import { useState, useEffect, FormEvent } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { motion } from "framer-motion";
 import { Mail, Lock, Eye, EyeOff, ArrowRight, Heart, Sparkles, Home } from "lucide-react";
 import { auth } from "@/utils/firebase/client";
-import { signInWithEmailAndPassword, GoogleAuthProvider, signInWithPopup } from "firebase/auth";
+import {
+  signInWithEmailAndPassword,
+  GoogleAuthProvider,
+  signInWithPopup,
+  signInWithRedirect,
+  getRedirectResult,
+} from "firebase/auth";
 
 /* ───────────────────────── shared ease ───────────────────────── */
 const EASE = [0.23, 1, 0.32, 1] as const;
@@ -148,8 +154,38 @@ function InteractiveVisual() {
   );
 }
 
+/* ── Friendly error messages ── */
+function getAuthErrorMessage(code: string): string {
+  switch (code) {
+    case "auth/popup-blocked":
+      return "Pop-up was blocked by your browser. Trying redirect instead...";
+    case "auth/popup-closed-by-user":
+      return "Sign-in was cancelled. Please try again.";
+    case "auth/cancelled-popup-request":
+      return "Only one sign-in window allowed at a time.";
+    case "auth/unauthorized-domain":
+      return "This domain is not authorized for sign-in. Please contact support.";
+    case "auth/account-exists-with-different-credential":
+      return "An account already exists with this email using a different sign-in method.";
+    case "auth/network-request-failed":
+      return "Network error. Check your connection and try again.";
+    case "auth/user-disabled":
+      return "This account has been disabled.";
+    case "auth/invalid-credential":
+    case "auth/wrong-password":
+    case "auth/user-not-found":
+      return "Invalid email or password.";
+    case "auth/invalid-email":
+      return "Please enter a valid email address.";
+    case "auth/too-many-requests":
+      return "Too many attempts. Please try again in a few minutes.";
+    default:
+      return "Sign-in failed. Please try again.";
+  }
+}
+
 /* ═══════════════════════════════════════════════════════════════
-   SignInForm — email/password form prepared for Firebase auth
+   SignInForm — email/password + Google auth (popup + redirect)
    ═══════════════════════════════════════════════════════════════ */
 function SignInForm() {
   const router = useRouter();
@@ -159,6 +195,21 @@ function SignInForm() {
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  // Handle redirect result when page loads (after signInWithRedirect)
+  useEffect(() => {
+    getRedirectResult(auth)
+      .then((result) => {
+        if (result?.user) {
+          router.push("/dashboard");
+        }
+      })
+      .catch((err) => {
+        if (err?.code && err.code !== "auth/popup-closed-by-user") {
+          setError(getAuthErrorMessage(err.code));
+        }
+      });
+  }, [router]);
+
   const onSubmit = async (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     setIsLoading(true);
@@ -166,9 +217,9 @@ function SignInForm() {
 
     try {
       await signInWithEmailAndPassword(auth, email, password);
-      router.push('/dashboard');
+      router.push("/dashboard");
     } catch (err: any) {
-      setError(err.message || 'Invalid credentials');
+      setError(getAuthErrorMessage(err?.code || ""));
       setIsLoading(false);
     }
   };
@@ -176,12 +227,35 @@ function SignInForm() {
   const handleGoogleSignIn = async () => {
     setIsLoading(true);
     setError(null);
+    const provider = new GoogleAuthProvider();
+    provider.setCustomParameters({ prompt: "select_account" });
+
     try {
-      const provider = new GoogleAuthProvider();
+      // Try popup first (works on desktop browsers)
       await signInWithPopup(auth, provider);
-      router.push('/dashboard');
+      router.push("/dashboard");
     } catch (err: any) {
-      setError(err.message || 'Google sign-in failed');
+      const code = err?.code || "";
+
+      // If popup was blocked or failed, fall back to redirect
+      if (
+        code === "auth/popup-blocked" ||
+        code === "auth/popup-closed-by-user" ||
+        code === "auth/cancelled-popup-request"
+      ) {
+        try {
+          // Redirect-based flow — page will reload after Google auth
+          await signInWithRedirect(auth, provider);
+          // This line won't execute — browser navigates away
+          return;
+        } catch (redirectErr: any) {
+          setError(getAuthErrorMessage(redirectErr?.code || ""));
+          setIsLoading(false);
+          return;
+        }
+      }
+
+      setError(getAuthErrorMessage(code));
       setIsLoading(false);
     }
   };

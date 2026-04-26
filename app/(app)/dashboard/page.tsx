@@ -432,6 +432,67 @@ export default function DashboardPage() {
     setDailyTask(newTask);
   }, []);
 
+  // Handle partner disconnect
+  const handleDisconnect = useCallback(async () => {
+    if (!currentUser) return;
+    
+    setIsActionLoading(true);
+    try {
+      const idToken = await currentUser.getIdToken();
+      const res = await fetch('/api/couples', {
+        method: 'DELETE',
+        headers: { 'Authorization': `Bearer ${idToken}` }
+      });
+
+      if (!res.ok) {
+        const errorData = await res.json();
+        throw new Error(errorData.error || 'Failed to disconnect');
+      }
+      
+      playSound(SoundType.SUCCESS);
+      // Local state will be updated by Firestore listeners
+      setPartner(null);
+      setCoupleId(null);
+      setCoupleStatus(null);
+    } catch (err: any) {
+      console.error("Disconnect error:", err);
+      alert(err.message || "Failed to disconnect. Please try again.");
+    } finally {
+      setIsActionLoading(false);
+    }
+  }, [currentUser]);
+
+  // Handle partner join
+  const handleJoin = useCallback(async (code: string) => {
+    if (!currentUser) return;
+    
+    setIsActionLoading(true);
+    try {
+      const idToken = await currentUser.getIdToken();
+      const res = await fetch('/api/couples/join', {
+        method: 'POST',
+        headers: { 
+          'Authorization': `Bearer ${idToken}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({ inviteCode: code })
+      });
+
+      if (!res.ok) {
+        const errorData = await res.json();
+        throw new Error(errorData.error || 'Failed to join');
+      }
+      
+      playSound(SoundType.SUCCESS);
+      // Success state will be picked up by listeners
+    } catch (err: any) {
+      console.error("Join error:", err);
+      alert(err.message || "Failed to join. Please try again.");
+    } finally {
+      setIsActionLoading(false);
+    }
+  }, [currentUser]);
+
   if (authLoading) {
     return (
       <div
@@ -480,6 +541,8 @@ export default function DashboardPage() {
             currentUserTaskCompleted={hasCompletedTask}
             isLoading={isPartnerLoading}
             coupleStatus={coupleStatus}
+            onDisconnect={handleDisconnect}
+            onJoin={handleJoin}
           />
           <PreferencesList partnerName={partner?.name || "Partner"} coupleId={coupleId} />
         </section>

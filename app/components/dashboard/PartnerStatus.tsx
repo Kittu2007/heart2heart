@@ -1,6 +1,7 @@
 "use client";
+import { useState } from "react";
 
-import { User, CheckCircle, Clock, Heart, Link as LinkIcon, UserPlus, Sparkles } from "lucide-react";
+import { User, CheckCircle, Clock, Heart, Link as LinkIcon, UserPlus, Sparkles, ShieldAlert } from "lucide-react";
 import Link from "next/link";
 
 interface PartnerStatusProps {
@@ -21,6 +22,8 @@ interface PartnerStatusProps {
   currentUserTaskCompleted?: boolean;
   isLoading?: boolean;
   coupleStatus?: string | null;
+  onDisconnect?: () => Promise<void>;
+  onJoin?: (code: string) => Promise<void>;
 }
 
 export default function PartnerStatus({
@@ -30,7 +33,11 @@ export default function PartnerStatus({
   currentUserTaskCompleted = false,
   isLoading = false,
   coupleStatus,
+  onDisconnect,
+  onJoin,
 }: PartnerStatusProps) {
+  const [isActionLoading, setIsActionLoading] = useState(false);
+  const [joinCode, setJoinCode] = useState("");
   const currentUserName = currentUser?.name || "You";
   const bothCompleted = currentUserTaskCompleted && partner?.taskCompleted;
 
@@ -78,13 +85,33 @@ export default function PartnerStatus({
                 <p className="text-[10px] text-[#78716c] max-w-[180px]">Share this code with your partner. Once they join, you'll be connected!</p>
               </div>
 
-              <Link
-                href="/connect"
-                className="w-full py-3 px-4 bg-[#1a1c1b] text-white rounded-xl text-sm font-semibold flex items-center justify-center gap-2 hover:bg-black transition-all shadow-sm active:scale-[0.98] group/btn"
-              >
-                <LinkIcon size={16} className="group-hover/btn:rotate-12 transition-transform" />
-                Manage Connection
-              </Link>
+              <div className="flex flex-col w-full gap-2 mt-auto">
+                <Link
+                  href="/connect"
+                  className="w-full py-3 px-4 bg-[#1a1c1b] text-white rounded-xl text-sm font-semibold flex items-center justify-center gap-2 hover:bg-black transition-all shadow-sm active:scale-[0.98] group/btn"
+                >
+                  <LinkIcon size={16} className="group-hover/btn:rotate-12 transition-transform" />
+                  Invite More
+                </Link>
+                
+                <button
+                  onClick={async () => {
+                    if (onDisconnect && confirm("Cancel pending connection and reset code?")) {
+                      setIsActionLoading(true);
+                      try {
+                        await onDisconnect();
+                      } finally {
+                        setIsActionLoading(false);
+                      }
+                    }
+                  }}
+                  disabled={isActionLoading}
+                  className="w-full py-2.5 px-4 bg-white border border-rose-100 text-rose-500 rounded-xl text-xs font-bold hover:bg-rose-50 transition-all flex items-center justify-center gap-2 active:scale-[0.98] disabled:opacity-50"
+                >
+                  <ShieldAlert size={14} />
+                  {isActionLoading ? "Processing..." : "Cancel Connection"}
+                </button>
+              </div>
             </>
           ) : (
             <>
@@ -108,13 +135,49 @@ export default function PartnerStatus({
                 </p>
               )}
 
-              <Link
-                href="/connect"
-                className="w-full py-3 px-4 bg-[#1a1c1b] text-white rounded-xl text-sm font-semibold flex items-center justify-center gap-2 hover:bg-black transition-all shadow-sm active:scale-[0.98] group/btn"
-              >
-                <LinkIcon size={16} className="group-hover/btn:rotate-12 transition-transform" />
-                {inviteCode ? "Connection Center" : "Connect Now"}
-              </Link>
+              <div className="flex flex-col w-full gap-3 mt-auto">
+                <div className="relative group/input">
+                  <input
+                    type="text"
+                    placeholder="Enter Partner Code"
+                    value={joinCode}
+                    onChange={(e) => setJoinCode(e.target.value.toUpperCase())}
+                    className="w-full bg-black/5 border border-black/5 rounded-xl px-4 py-3 text-sm font-bold tracking-widest placeholder:tracking-normal placeholder:font-medium focus:outline-none focus:ring-2 focus:ring-brand-rose/20 transition-all"
+                  />
+                  {joinCode.length > 0 && (
+                    <button
+                      onClick={async () => {
+                        if (onJoin) {
+                          setIsActionLoading(true);
+                          try {
+                            await onJoin(joinCode);
+                          } finally {
+                            setIsActionLoading(false);
+                          }
+                        }
+                      }}
+                      disabled={isActionLoading || joinCode.length < 4}
+                      className="absolute right-2 top-2 bottom-2 px-4 bg-brand-rose text-white rounded-lg text-xs font-bold hover:bg-brand-rose-dark transition-all disabled:opacity-50 active:scale-95"
+                    >
+                      {isActionLoading ? "..." : "Join"}
+                    </button>
+                  )}
+                </div>
+
+                <div className="flex items-center gap-2">
+                  <div className="h-px flex-1 bg-black/5" />
+                  <span className="text-[10px] text-[#78716c] font-bold uppercase tracking-wider">or</span>
+                  <div className="h-px flex-1 bg-black/5" />
+                </div>
+
+                <Link
+                  href="/connect"
+                  className="w-full py-3 px-4 bg-black/5 text-[#1a1c1b] rounded-xl text-sm font-semibold flex items-center justify-center gap-2 hover:bg-black/10 transition-all active:scale-[0.98]"
+                >
+                  <LinkIcon size={16} />
+                  Connection Center
+                </Link>
+              </div>
             </>
           )}
         </div>
@@ -302,6 +365,35 @@ export default function PartnerStatus({
               </div>
             </>
           )}
+        </div>
+
+        {/* Action Controls */}
+        <div className="mt-6 flex items-center gap-2">
+          <button
+            onClick={async () => {
+              if (onDisconnect && confirm("Disconnect from partner?")) {
+                setIsActionLoading(true);
+                try {
+                  await onDisconnect();
+                } finally {
+                  setIsActionLoading(false);
+                }
+              }
+            }}
+            disabled={isActionLoading}
+            className="flex-1 py-2.5 px-4 bg-white border border-rose-100 text-rose-500 rounded-xl text-xs font-bold hover:bg-rose-50 transition-all flex items-center justify-center gap-2 active:scale-[0.98] disabled:opacity-50"
+          >
+            <ShieldAlert size={14} />
+            {isActionLoading ? "Processing..." : "Disconnect Partner"}
+          </button>
+          
+          <Link
+            href="/connect"
+            className="p-2.5 bg-black/5 text-[#78716c] rounded-xl hover:bg-black/10 transition-all active:scale-[0.98]"
+            title="Connection Center"
+          >
+            <LinkIcon size={16} />
+          </Link>
         </div>
       </div>
 

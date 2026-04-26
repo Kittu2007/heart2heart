@@ -376,13 +376,6 @@ export default function PartnerStatus({
           >
             <ShieldAlert size={16} />
           </Link>
-          <Link
-            href="/connect"
-            className="p-2.5 bg-black/5 text-[#78716c] rounded-xl hover:bg-black/10 transition-all active:scale-[0.98]"
-            title="Connection Center"
-          >
-            <LinkIcon size={16} />
-          </Link>
         </div>
       </div>
 

@@ -176,7 +176,7 @@ export const GET = withAuth(async (_req: NextRequest, user: UserContext) => {
         .single();
 
       if (!error && couple) {
-        return Response.json({ couple });
+        return Response.json({ couple, currentUserDbId: user.dbId });
       }
     }
 

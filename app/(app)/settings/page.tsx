@@ -21,8 +21,8 @@ export default function SettingsPage() {
         fetch('/api/couples', { headers: { Authorization: `Bearer ${token}` } })
           .then(res => res.json())
           .then(data => {
-            if (data?.couple) {
-              const currentDbId = profile.dbId;
+            if (data?.couple && data.currentUserDbId) {
+              const currentDbId = data.currentUserDbId;
               const pA = data.couple.partner_a;
               const pB = data.couple.partner_b;
               const partnerInfo = (pA && pA.id !== currentDbId) ? pA : (pB && pB.id !== currentDbId) ? pB : null;

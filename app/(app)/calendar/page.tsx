@@ -1,6 +1,7 @@
-﻿"use client";
+"use client";
 
 import { useState } from "react";
+import TopNavBar from "@/app/components/dashboard/TopNavBar";
 import AddEventModal from "@/components/calendar/AddEventModal";
 import CalendarGrid from "@/components/calendar/CalendarGrid";
 import EventSidebar from "@/components/calendar/EventSidebar";
@@ -42,7 +43,7 @@ const buildSeedEvents = (): Event[] => {
   return [
     {
       id: crypto.randomUUID(),
-      title: "Movie Night ??",
+      title: "Movie Night 🎬",
       type: "date",
       date: withOffset(3),
       description: "Cozy night in with popcorn and your favorite film.",
@@ -56,7 +57,7 @@ const buildSeedEvents = (): Event[] => {
     },
     {
       id: crypto.randomUUID(),
-      title: "Open on Birthday ??",
+      title: "Open on Birthday ❤️",
       type: "message",
       date: withOffset(14),
       description: "A little love letter waiting for you.",
@@ -104,41 +105,15 @@ export default function CalendarPage() {
   ).length;
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-rose-50 via-white to-pink-50">
-      <nav className="sticky top-0 z-10 border-b border-rose-100 bg-white/90 backdrop-blur-sm">
-        <div className="mx-auto flex w-full max-w-6xl items-center justify-between px-4 py-4">
-          <div className="flex items-center gap-2">
-            <span className="text-xl text-rose-500">??</span>
-            <span className="text-lg font-bold tracking-tight text-neutral-800">
-              Heart2Heart
-            </span>
-          </div>
-          <div className="flex items-center gap-1 rounded-xl bg-rose-50 p-1">
-            {["Dashboard", "Calendar", "Timeline", "Settings"].map((tab) => (
-              <button
-                key={tab}
-                className={`rounded-lg px-3.5 py-1.5 text-sm font-semibold transition-all duration-150 active:scale-95 ${
-                  tab === "Calendar"
-                    ? "bg-rose-500 text-white shadow-sm"
-                    : "text-neutral-500 hover:text-rose-600"
-                }`}
-              >
-                {tab}
-              </button>
-            ))}
-          </div>
-          <div className="flex h-8 w-8 items-center justify-center rounded-full bg-rose-500 text-sm font-bold text-white">
-            H
-          </div>
-        </div>
-      </nav>
+    <div className="min-h-screen bg-[#F9F9F7]">
+      <TopNavBar />
 
-      <main className="mx-auto w-full max-w-6xl px-4 py-8">
+      <main className="mx-auto w-full max-w-[1200px] px-6 py-10">
         <div className="mb-6">
-          <p className="mb-1 text-xs font-semibold uppercase tracking-widest text-rose-400">
+          <p className="mb-1 text-xs font-semibold uppercase tracking-widest text-brand-rose/70">
             Your Moments
           </p>
-          <h1 className="text-3xl font-bold text-neutral-800">Calendar</h1>
+          <h1 className="text-3xl font-bold text-[#1a1c1b]">Calendar</h1>
         </div>
 
         <div className="grid grid-cols-1 gap-6 lg:grid-cols-[1fr_340px]">
@@ -219,4 +194,3 @@ export default function CalendarPage() {
     </div>
   );
 }
-

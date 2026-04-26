@@ -21,9 +21,15 @@ export type UserContext = {
 };
 
 export async function getAuthUser(req: NextRequest): Promise<UserContext> {
-  const decodedToken = await verifyFirebaseToken(req);
-  if (!decodedToken) throw new AuthError('Unauthorized: Invalid or missing token', 401);
+  const result = await verifyFirebaseToken(req);
+  
+  if (!result.decoded) {
+    console.error(`[Auth] Verification failed for ${req.url}: ${result.error}`);
+    // Provide the error detail in the message so the frontend can display it
+    throw new AuthError(result.error || 'Unauthorized: Invalid token', result.code || 401);
+  }
 
+  const decodedToken = result.decoded;
   const firebaseUid = decodedToken.uid;
 
   const query = supabaseAdmin.from('profiles') as any;

@@ -13,7 +13,9 @@ async function authFetch(url: string, options: RequestInit = {}, timeoutMs = 200
   const user = auth.currentUser;
   if (!user) throw new Error("Not authenticated");
 
-  const token = await user.getIdToken();
+  const token = await user.getIdToken(true); // Force refresh for maximum reliability
+  if (!token) throw new Error("Could not generate auth token");
+  console.log(`[authFetch] Token length: ${token.length}`);
 
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);

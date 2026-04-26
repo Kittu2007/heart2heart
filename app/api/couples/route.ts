@@ -24,6 +24,7 @@ async function getUniqueInviteCode(): Promise<string> {
 }
 
 // POST /api/couples — create a new couple or return existing pending one
+export const POST = withAuth(async (req: NextRequest, user: UserContext) => {
   // If the user has a coupleId, check its status before erroring
   if (user.coupleId) {
     const { data: couple } = await supabaseAdmin

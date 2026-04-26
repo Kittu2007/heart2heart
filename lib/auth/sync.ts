@@ -1,5 +1,6 @@
 import { supabaseAdmin } from '../supabase/admin';
 import type { Database } from '../supabase/database.types';
+import { syncProfileToFirestore, syncCoupleToFirestore } from './firestore-sync';
 
 type Profile = Database['public']['Tables']['profiles']['Row'];
 type ProfileInsert = Database['public']['Tables']['profiles']['Insert'];
@@ -36,6 +37,68 @@ export async function syncFirebaseUserToSupabase(
   }
 
   console.log('[SYNC] success, profile id:', profile?.id);
+
+  // EAGER CODE GENERATION: Assign a permanent code if they don't have one
+  if (profile && !profile.couple_id) {
+    console.log('[SYNC] No coupleId, checking for existing or creating new...');
+    try {
+      const { data: existing } = await supabaseAdmin
+        .from('couples')
+        .select('id, invite_code, status, partner_a_id, partner_b_id')
+        .or(`partner_a_id.eq.${profile.id},partner_b_id.eq.${profile.id}`)
+        .maybeSingle();
+
+      if (existing) {
+        console.log('[SYNC] Found existing couple record, linking to profile');
+        const { data: updated } = await supabaseAdmin
+          .from('profiles')
+          .update({ couple_id: existing.id })
+          .eq('id', profile.id)
+          .select()
+          .single();
+        if (updated) profile.couple_id = updated.couple_id;
+
+        // Sync to Firestore
+        await syncCoupleToFirestore(existing.id, {
+          inviteCode: existing.invite_code,
+          partnerAId: existing.partner_a_id,
+          partnerBId: existing.partner_b_id,
+          status: existing.status
+        });
+      } else {
+        console.log('[SYNC] Creating new permanent invite code...');
+        const inviteCode = Math.random().toString(36).substring(2, 8).toUpperCase();
+        const { data: newCouple } = await (supabaseAdmin.from('couples') as any)
+          .insert({
+            partner_a_id: profile.id,
+            invite_code: inviteCode,
+            status: 'pending'
+          })
+          .select()
+          .single();
+
+        if (newCouple) {
+          const { data: updatedProfile } = await supabaseAdmin
+            .from('profiles')
+            .update({ couple_id: newCouple.id })
+            .eq('id', profile.id)
+            .select()
+            .single();
+          if (updatedProfile) profile.couple_id = updatedProfile.couple_id;
+
+          // Sync new couple to Firestore
+          await syncCoupleToFirestore(newCouple.id, {
+            inviteCode: newCouple.invite_code,
+            partnerAId: newCouple.partner_a_id,
+            status: 'pending'
+          });
+        }
+      }
+    } catch (e) {
+      console.error('[SYNC] Failed to auto-assign code:', e);
+    }
+  }
+
   return { profile, error: null };
 }
 

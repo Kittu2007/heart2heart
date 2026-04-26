@@ -68,6 +68,7 @@ export default function DashboardPage() {
   const [hasCompletedTask, setHasCompletedTask] = useState(false);
   const [hasSubmittedFeedback, setHasSubmittedFeedback] = useState(false);
   const [coupleId, setCoupleId] = useState<string | null>(null);
+  const [inviteCode, setInviteCode] = useState<string | null>(null);
   const [connectionScore, setConnectionScore] = useState(0);
   const [reflection, setReflection] = useState("");
 
@@ -119,7 +120,11 @@ export default function DashboardPage() {
       }
       
       const data = docSnap.data();
-      const partnerId = data.partner_a_id === currentUser.uid ? data.partner_b_id : data.partner_a_id;
+      if (data?.inviteCode) {
+        setInviteCode(data.inviteCode);
+      }
+      
+      const partnerId = data?.partner_a_id === currentUser.uid ? data?.partner_b_id : data?.partner_a_id;
       
       if (!partnerId) {
         setIsPartnerLoading(false);
@@ -406,6 +411,7 @@ export default function DashboardPage() {
               photoUrl: currentUser.photoURL || undefined,
             } : null}
             partner={partner}
+            inviteCode={inviteCode}
             currentUserTaskCompleted={hasCompletedTask}
             isLoading={isPartnerLoading}
           />

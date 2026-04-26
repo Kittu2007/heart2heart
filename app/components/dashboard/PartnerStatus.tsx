@@ -17,6 +17,7 @@ interface PartnerStatusProps {
     mood?: string;
     photoUrl?: string;
   } | null;
+  inviteCode?: string | null;
   currentUserTaskCompleted?: boolean;
   isLoading?: boolean;
 }
@@ -24,6 +25,7 @@ interface PartnerStatusProps {
 export default function PartnerStatus({
   currentUser,
   partner,
+  inviteCode,
   currentUserTaskCompleted = false,
   isLoading = false,
 }: PartnerStatusProps) {
@@ -61,16 +63,27 @@ export default function PartnerStatus({
           </div>
           
           <h4 className="text-base font-bold text-[#1a1c1b] mb-2">No Partner Linked</h4>
-          <p className="text-xs text-[#78716c] text-center max-w-[200px] mb-6 leading-relaxed">
-            Connect with your partner to track your progress together and earn daily rewards.
-          </p>
+          
+          {inviteCode ? (
+            <div className="flex flex-col items-center gap-3 w-full mb-6 text-center">
+              <p className="text-[10px] uppercase tracking-widest text-[#78716c] font-black">Your Permanent Code</p>
+              <div className="bg-brand-rose/5 border border-brand-rose/20 px-6 py-4 rounded-2xl w-full">
+                <span className="text-2xl font-black tracking-[0.2em] text-brand-rose select-all">{inviteCode}</span>
+              </div>
+              <p className="text-[10px] text-[#78716c] max-w-[180px]">Share this code with your partner to start your journey together.</p>
+            </div>
+          ) : (
+            <p className="text-xs text-[#78716c] text-center max-w-[200px] mb-6 leading-relaxed">
+              Connect with your partner to track your progress together and earn daily rewards.
+            </p>
+          )}
 
           <Link 
             href="/connect"
             className="w-full py-3 px-4 bg-[#1a1c1b] text-white rounded-xl text-sm font-semibold flex items-center justify-center gap-2 hover:bg-black transition-all shadow-sm active:scale-[0.98] group/btn"
           >
             <LinkIcon size={16} className="group-hover/btn:rotate-12 transition-transform" />
-            Connect Now
+            {inviteCode ? "Connection Center" : "Connect Now"}
           </Link>
         </div>
 

@@ -121,24 +121,47 @@ export const POST = withAuth(async (req: NextRequest, user: UserContext) => {
 
 // GET /api/couples — get current user's couple info
 export const GET = withAuth(async (_req: NextRequest, user: UserContext) => {
-  if (!user.coupleId) {
-    return Response.json({ couple: null }, { status: 200 });
-  }
-
   try {
     const query = supabaseAdmin.from('couples') as any;
-    const { data: couple, error } = await query
-      .select(`
-        id, invite_code, status, created_at,
-        partner_a:profiles!couples_partner_a_id_fkey (id, name, avatar_url, onboarding_done),
-        partner_b:profiles!couples_partner_b_id_fkey (id, name, avatar_url, onboarding_done)
-      `)
-      .eq('id', user.coupleId)
-      .single();
+    
+    // 1. If user has a coupleId in context, use it
+    if (user.coupleId) {
+      const { data: couple, error } = await query
+        .select(`
+          id, invite_code, status, created_at,
+          partner_a:profiles!couples_partner_a_id_fkey (id, name, avatar_url, onboarding_done),
+          partner_b:profiles!couples_partner_b_id_fkey (id, name, avatar_url, onboarding_done)
+        `)
+        .eq('id', user.coupleId)
+        .single();
 
-    if (error) throw error;
+      if (!error && couple) {
+        return Response.json({ couple });
+      }
+    }
 
-    return Response.json({ couple });
+    // 2. Fallback: search for a pending couple where this user is partner_a
+    // This handles cases where the profile link is missing or token is stale
+    const { data: pending, error: pendingError } = await query
+      .select('id, invite_code, status, created_at, partner_a_id, partner_b_id')
+      .eq('partner_a_id', user.uid)
+      .eq('status', 'pending')
+      .maybeSingle();
+
+    if (pending) {
+      return Response.json({ 
+        couple: {
+          id: pending.id,
+          invite_code: pending.invite_code,
+          status: pending.status,
+          created_at: pending.created_at,
+          partner_a: { id: user.uid }, // minimal profile
+          partner_b: null
+        }
+      });
+    }
+
+    return Response.json({ couple: null }, { status: 200 });
   } catch (error) {
     console.error('Get couple error:', error);
     return Response.json({ error: 'Failed to fetch couple' }, { status: 500 });

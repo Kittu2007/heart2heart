@@ -90,6 +90,12 @@ export default function CalendarPage() {
     setEvents((previous) => [...previous, event]);
   };
 
+  const handleDeleteEvent = (eventId: string) => {
+    const confirmed = window.confirm("Delete this event?");
+    if (!confirmed) return;
+    setEvents((previous) => previous.filter((event) => event.id !== eventId));
+  };
+
   const selectedDateIso = makeIsoDate(selectedDate);
   const today = new Date();
   today.setHours(0, 0, 0, 0);
@@ -164,6 +170,7 @@ export default function CalendarPage() {
               selectedDate={selectedDate}
               events={events}
               onAddEvent={() => setShowModal(true)}
+              onDeleteEvent={handleDeleteEvent}
             />
           </section>
         </div>

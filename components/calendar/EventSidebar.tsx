@@ -19,6 +19,7 @@ type Props = {
   selectedDate: Date;
   events: Event[];
   onAddEvent: () => void;
+  onDeleteEvent: (eventId: string) => void;
 };
 
 const iconForEvent = (event: Event) => {
@@ -33,7 +34,13 @@ const typeBadgeClass = (type: Event["type"]) => {
   return "bg-purple-100 text-purple-700";
 };
 
-function EventCard({ event }: { event: Event }) {
+function EventCard({
+  event,
+  onDeleteEvent,
+}: {
+  event: Event;
+  onDeleteEvent: (eventId: string) => void;
+}) {
   const lockedMessage = event.type === "message" && !isUnlocked(event.date);
 
   return (
@@ -68,13 +75,26 @@ function EventCard({ event }: { event: Event }) {
               {event.description}
             </p>
           )}
+
+          <button
+            type="button"
+            onClick={() => onDeleteEvent(event.id)}
+            className="mt-3 rounded-lg border border-rose-200 px-2.5 py-1 text-xs font-semibold text-rose-600 transition-colors hover:bg-rose-50 active:scale-95"
+          >
+            Delete
+          </button>
         </div>
       </div>
     </article>
   );
 }
 
-export default function EventSidebar({ selectedDate, events, onAddEvent }: Props) {
+export default function EventSidebar({
+  selectedDate,
+  events,
+  onAddEvent,
+  onDeleteEvent,
+}: Props) {
   const selectedEvents = events.filter((event) =>
     isSameDay(new Date(event.date), selectedDate)
   );
@@ -122,7 +142,13 @@ export default function EventSidebar({ selectedDate, events, onAddEvent }: Props
               </p>
             </div>
           ) : (
-            selectedEvents.map((event) => <EventCard key={event.id} event={event} />)
+            selectedEvents.map((event) => (
+              <EventCard
+                key={event.id}
+                event={event}
+                onDeleteEvent={onDeleteEvent}
+              />
+            ))
           )}
         </div>
       </section>
@@ -156,6 +182,13 @@ export default function EventSidebar({ selectedDate, events, onAddEvent }: Props
                   )}
                 </p>
               </div>
+              <button
+                type="button"
+                onClick={() => onDeleteEvent(event.id)}
+                className="rounded-lg border border-rose-200 px-2 py-1 text-xs font-semibold text-rose-600 transition-colors hover:bg-white active:scale-95"
+              >
+                Delete
+              </button>
             </div>
           ))}
         </div>

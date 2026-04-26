@@ -179,47 +179,46 @@ export default function DashboardPage() {
 
       setIsPartnerLoading(false);
 
-      // Query for the partner profile by their dbId
+      // Query for the partner profile by their dbId (Supabase UUID)
+      // This is more robust than direct doc access because doc IDs are Firebase UIDs
       try {
         const partnerQuery = query(collection(db, "profiles"), where("dbId", "==", partnerId), limit(1));
         const querySnap = onSnapshot(partnerQuery, (snap) => {
           if (!snap.empty) {
             const partnerData = snap.docs[0].data();
+            const lastSeen = partnerData.lastSeen?.toDate();
+            const isOnline = lastSeen ? (new Date().getTime() - lastSeen.getTime() < 60000) : false;
+
+            console.log(`[Dashboard] Partner data received:`, partnerData.displayName, "Online:", isOnline);
+
             setPartner(prev => {
-              if (!prev) return null;
+              // Note: We don't return null here if prev is null because we want to initialize it
+              // if it's the first time we get data
+              const base = prev || { 
+                name: "Partner", 
+                isOnline: false, 
+                taskCompleted: false 
+              };
+              
               return {
-                ...prev,
-                name: partnerData?.displayName || partnerData?.name || prev.name,
-                photoUrl: partnerData?.photoURL || prev.photoUrl,
+                ...base,
+                name: partnerData?.displayName || partnerData?.name || base.name,
+                photoUrl: partnerData?.photoURL || base.photoUrl,
+                isOnline,
+                lastSeen: lastSeen?.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+                mood: partnerData?.mood || base.mood,
               };
             });
+          } else {
+            console.warn(`[Dashboard] No profile found in Firestore for partner dbId: ${partnerId}`);
           }
+        }, (err) => {
+          console.error("[Dashboard] Partner query error:", err);
         });
         cleanups.push(querySnap);
       } catch (e) {
         console.error("Partner lookup error:", e);
       }
-
-      // Listen for partner's online status (single-field, no index needed)
-      const profileUnsub = onSnapshot(doc(db, "profiles", partnerId), (snap) => {
-        if (snap.exists()) {
-          const profileData = snap.data();
-          const lastSeen = profileData.lastSeen?.toDate();
-          const isOnline = lastSeen ? (new Date().getTime() - lastSeen.getTime() < 60000) : false;
-
-          setPartner(prev => {
-            if (!prev) return null;
-            return {
-              ...prev,
-              isOnline,
-              lastSeen: lastSeen?.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-              name: profileData?.displayName || profileData?.name || prev.name,
-              photoUrl: profileData?.photoURL || prev.photoUrl,
-            };
-          });
-        }
-      });
-      cleanups.push(profileUnsub);
 
       // Listen for partner's task completion (single-field query + client filter)
       const taskQ = query(

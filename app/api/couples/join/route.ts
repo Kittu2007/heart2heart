@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { withAuth, UserContext } from '@/lib/auth/with-auth';
 import { supabaseAdmin } from '@/lib/supabase/admin';
 import { syncProfileToFirestore, syncCoupleToFirestore } from '@/lib/auth/firestore-sync';
+import { adminDb } from '@/lib/firebase/admin-db';
 
 const JoinSchema = z.object({
   inviteCode: z.string().trim().min(6).max(12).toUpperCase(),
@@ -76,14 +77,30 @@ export const POST = withAuth(async (req: NextRequest, user: UserContext) => {
     if (e2) throw e2;
 
     // 5. Sync to Firestore
-    await Promise.all([
+    const syncPromises = [
       syncProfileToFirestore(user.uid, { coupleId: couple.id, dbId: user.dbId }),
-      // Note: Partner A's Firestore doc will sync when they next login or via background process
       syncCoupleToFirestore(couple.id, { 
         partnerBId: user.dbId, 
         status: 'active' 
       })
-    ]);
+    ];
+
+    // Try to find and sync Partner A as well
+    try {
+      const partnerASnap = await adminDb.collection('profiles')
+        .where('dbId', '==', couple.partner_a_id)
+        .limit(1)
+        .get();
+
+      if (!partnerASnap.empty) {
+        const partnerAUid = partnerASnap.docs[0].id;
+        syncPromises.push(syncProfileToFirestore(partnerAUid, { coupleId: couple.id }));
+      }
+    } catch (e) {
+      console.error('[JOIN] Failed to find Partner A in Firestore:', e);
+    }
+
+    await Promise.all(syncPromises);
 
     return Response.json({
       couple: {

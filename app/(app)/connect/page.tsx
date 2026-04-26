@@ -71,9 +71,13 @@ export default function ConnectPage() {
 
       if (getResult.couple && getResult.couple.invite_code) {
         setInviteCode(getResult.couple.invite_code);
-        // If already active, just go to dashboard
+        // If already active, show success state before redirecting
         if (getResult.couple.status === 'active') {
-          router.push('/dashboard');
+          setConnectionSuccess(true);
+          setTimeout(() => {
+            router.push('/dashboard');
+          }, 2000);
+          return;
         }
       } else {
         // 2. No couple yet — create one

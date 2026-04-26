@@ -1,11 +1,24 @@
 import { NextRequest } from 'next/server';
+import { createHash } from 'crypto';
 import { z } from 'zod';
 import { withAuth, UserContext } from '@/lib/auth/with-auth';
 import { supabaseAdmin } from '@/lib/supabase/admin';
 import { syncProfileToFirestore, syncCoupleToFirestore } from '@/lib/auth/firestore-sync';
 
-function generateInviteCode(): string {
+function generateInviteCode(seed?: string): string {
   const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'; // no ambiguous chars
+  
+  if (seed) {
+    // Deterministic code based on seed (e.g. dbId)
+    const hash = createHash('md5').update(seed).digest('hex');
+    let code = '';
+    for (let i = 0; i < 8; i++) {
+      const charIndex = parseInt(hash.substring(i * 2, i * 2 + 2), 16) % chars.length;
+      code += chars[charIndex];
+    }
+    return code;
+  }
+
   let code = '';
   for (let i = 0; i < 8; i++) {
     code += chars[Math.floor(Math.random() * chars.length)];
@@ -13,8 +26,13 @@ function generateInviteCode(): string {
   return code;
 }
 
-async function getUniqueInviteCode(): Promise<string> {
+async function getUniqueInviteCode(seed?: string): Promise<string> {
   const query = supabaseAdmin.from('couples') as any;
+  
+  if (seed) {
+    return generateInviteCode(seed);
+  }
+
   for (let attempt = 0; attempt < 10; attempt++) {
     const code = generateInviteCode();
     const { data } = await query.select('id').eq('invite_code', code).single();
@@ -76,8 +94,21 @@ export const POST = withAuth(async (req: NextRequest, user: UserContext) => {
       }, { status: 200 });
     }
 
-    // 2. Generate unique code and insert
-    const inviteCode = await getUniqueInviteCode();
+    // 2. Generate deterministic code and insert
+    const inviteCode = await getUniqueInviteCode(user.dbId);
+    
+    // Check if this code already exists in a non-active couple (cleanup)
+    const { data: duplicate } = await couplesQuery
+      .select('id')
+      .eq('invite_code', inviteCode)
+      .neq('status', 'active')
+      .maybeSingle();
+
+    if (duplicate) {
+      // Re-use or delete old one? Let's just delete to be clean
+      await couplesQuery.delete().eq('id', duplicate.id);
+    }
+
     const { data: couple, error: createError } = await couplesQuery
       .insert({
         invite_code: inviteCode,
@@ -180,23 +211,50 @@ export const GET = withAuth(async (_req: NextRequest, user: UserContext) => {
 // DELETE /api/couples — disconnect/leave current couple
 export const DELETE = withAuth(async (_req: NextRequest, user: UserContext) => {
   try {
-    if (!user.coupleId) {
-      // Even if they don't have a coupleId in context, try to clear it from Supabase just in case
-      await supabaseAdmin.from('profiles').update({ couple_id: null }).eq('id', user.dbId);
-      await syncProfileToFirestore(user.uid, { coupleId: null, dbId: user.dbId });
-      return Response.json({ message: 'Disconnected (no active couple found in session)' });
+    const couplesQuery = supabaseAdmin.from('couples') as any;
+    const profilesQuery = supabaseAdmin.from('profiles') as any;
+
+    let coupleId = user.coupleId;
+    let partnerId: string | null = null;
+
+    // 1. Find the couple and the partner if possible
+    if (coupleId) {
+      const { data: couple } = await couplesQuery
+        .select('id, partner_a_id, partner_b_id')
+        .eq('id', coupleId)
+        .maybeSingle();
+      
+      if (couple) {
+        partnerId = couple.partner_a_id === user.dbId ? couple.partner_b_id : couple.partner_a_id;
+      }
+    } else {
+      // Fallback: check if they are in any couple even if not in context
+      const { data: profile } = await profilesQuery.select('couple_id').eq('id', user.dbId).single();
+      if (profile?.couple_id) {
+        coupleId = profile.couple_id;
+        const { data: couple } = await couplesQuery.select('id, partner_a_id, partner_b_id').eq('id', coupleId).maybeSingle();
+        if (couple) {
+          partnerId = couple.partner_a_id === user.dbId ? couple.partner_b_id : couple.partner_a_id;
+        }
+      }
     }
 
-    // 1. Clear profile's couple_id
-    const { error: profileError } = await supabaseAdmin
-      .from('profiles')
-      .update({ couple_id: null })
-      .eq('id', user.dbId);
-
-    if (profileError) throw profileError;
-
-    // 2. Sync to Firestore
+    // 2. Clear current user
+    await profilesQuery.update({ couple_id: null }).eq('id', user.dbId);
     await syncProfileToFirestore(user.uid, { coupleId: null, dbId: user.dbId });
+
+    // 3. Clear partner if they exist
+    if (partnerId) {
+      await profilesQuery.update({ couple_id: null }).eq('id', partnerId);
+      
+      // We can't easily sync partner to Firestore because we don't have their Firebase UID here.
+      // However, we'll delete the couple record, which their dashboard listener should pick up.
+    }
+
+    // 4. Delete the couple record
+    if (coupleId) {
+      await couplesQuery.delete().eq('id', coupleId);
+    }
 
     return Response.json({ message: 'Disconnected successfully' });
   } catch (error: any) {

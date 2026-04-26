@@ -304,7 +304,7 @@ export default function DashboardPage() {
     cleanups.push(feedbackUnsub);
 
     return () => cleanups.forEach(fn => fn());
-  }, [currentUser, coupleId]);
+  }, [currentUser, coupleId, dbId]);
 
   // Handle task completion - opens feedback modal
   const handleTaskComplete = useCallback(async () => {

@@ -24,10 +24,10 @@ Modern couples are busy. Date nights get postponed, conversations become transac
 
 Heart2Heart is a **real-time relationship engagement platform** that:
 
-1. **Learns** each partner's love language, mood, and comfort level
-2. **Generates** a personalized daily activity using AI (not random — *contextual*)
-3. **Tracks** completion, feedback, and emotional trends over time
-4. **Adapts** future tasks based on what actually worked
+1. **Learns** each partner's love language, mood, and comfort level.
+2. **Generates** a personalized daily activity using AI (contextual, not random).
+3. **Tracks** completion, feedback, and emotional trends over time.
+4. **Adapts** future tasks based on what actually worked for the couple.
 
 > Think of it as a personal relationship coach that lives in your pocket — backed by AI, grounded in behavioral science.
 
@@ -37,20 +37,20 @@ Heart2Heart is a **real-time relationship engagement platform** that:
 
 | Feature | Description |
 |---|---|
-| 🤖 **AI Task Generation** | NVIDIA MiniMax M2.7 generates unique daily activities tailored to mood, love language, and comfort level |
-| 💑 **Partner Linking** | 6-character invite codes to connect couples in real-time with live presence tracking |
-| 📊 **Connection Score** | Dynamic score calculated from task quality (80%) and consistency (20%) |
-| 🎭 **Mood Check-ins** | Emoji-based mood selector with optional partner sharing |
-| 📈 **Activity Timeline** | Full history of completed activities with ratings and emotional trends |
-| ⚙️ **Preferences** | Sound effects, notification controls, and relationship settings |
-| 🔊 **Sound Design** | Premium audio feedback (clicks, success chimes) respecting user preferences |
-| 🛡️ **Admin Dashboard** | Full admin panel with user management, couple oversight, and AI monitoring |
+| 🤖 **AI Task Generation** | NVIDIA MiniMax M2.7 generates unique daily activities tailored to mood, love language, and comfort level. |
+| 💑 **Partner Linking** | 6-character invite codes to connect couples in real-time with live presence tracking. |
+| 📊 **Connection Score** | Dynamic score calculated from task quality (80%) and consistency (20%). |
+| 🎭 **Mood Check-ins** | Emoji-based mood selector with optional partner sharing. |
+| 📈 **Activity Timeline** | Full history of completed activities with ratings and emotional trends. |
+| ⚙️ **Preferences** | Sound effects, notification controls, and relationship settings. |
+| 🔊 **Sound Design** | Premium audio feedback (clicks, success chimes) respecting user preferences. |
+| 🛡️ **Admin Dashboard** | Full admin panel with user management, couple oversight, and AI monitoring. |
 
 ---
 
 ## 🏗️ Architecture
 
-```
+```text
 ┌─────────────────────────────────────────────────────┐
 │                    Frontend (Next.js 16)             │
 │  ┌──────────┐  ┌──────────┐  ┌──────────┐           │
@@ -68,7 +68,7 @@ Heart2Heart is a **real-time relationship engagement platform** that:
         │  /api/tasks             │
         │  /api/couples           │──▶ Supabase (Postgres)
         │  /api/mood              │
-        │  /api/auth/sync         │──▶ Firebase Admin SDK
+        │  /api/auth/sync         │──▶ Firebase Auth REST Fallback
         │  /api/admin/*           │
         └─────────────────────────┘
 ```
@@ -77,8 +77,8 @@ Heart2Heart is a **real-time relationship engagement platform** that:
 
 | Layer | Database | Why |
 |---|---|---|
-| **Frontend real-time** | Firebase Firestore | Instant UI updates, presence, preferences |
-| **Backend relational** | Supabase (Postgres) | Couples, tasks, feedback, mood — with RLS policies |
+| **Frontend Real-Time** | Firebase Firestore | Instant UI updates, presence, preferences |
+| **Backend Relational** | Supabase (Postgres) | Couples, tasks, feedback, mood — with robust schema |
 | **Auth** | Firebase Authentication | Google Sign-In, email/password |
 
 ---
@@ -89,7 +89,7 @@ Heart2Heart is a **real-time relationship engagement platform** that:
 
 - Node.js 18+
 - Firebase project (Auth + Firestore enabled)
-- Supabase project (run `schema.sql`)
+- Supabase project
 - NVIDIA API key ([NVIDIA NIM](https://build.nvidia.com/))
 
 ### 1. Clone & Install
@@ -102,29 +102,25 @@ npm install
 
 ### 2. Environment Variables
 
-Create a `.env.local` file:
+Create a `.env.local` file in the root directory:
 
 ```env
-# Firebase Client
-NEXT_PUBLIC_FIREBASE_API_KEY=your_key
-NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN=your_domain
-NEXT_PUBLIC_FIREBASE_PROJECT_ID=your_project_id
-NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET=your_bucket
-NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID=your_sender_id
-NEXT_PUBLIC_FIREBASE_APP_ID=your_app_id
-
-# Firebase Admin (for API routes)
-FIREBASE_PROJECT_ID=your_project_id
-FIREBASE_CLIENT_EMAIL=your_service_account_email
-FIREBASE_PRIVATE_KEY="-----BEGIN PRIVATE KEY-----\n...\n-----END PRIVATE KEY-----\n"
-
 # Supabase
 NEXT_PUBLIC_SUPABASE_URL=https://your-project.supabase.co
 NEXT_PUBLIC_SUPABASE_ANON_KEY=your_anon_key
 SUPABASE_SERVICE_ROLE_KEY=your_service_role_key
 
-# AI
-NVIDIA_API_KEY=your_nvidia_api_key
+# Firebase Client
+NEXT_PUBLIC_FIREBASE_API_KEY=your_api_key
+NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN=your_project.firebaseapp.com
+NEXT_PUBLIC_FIREBASE_PROJECT_ID=your_project_id
+NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET=your_project.firebasestorage.app
+NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID=your_sender_id
+NEXT_PUBLIC_FIREBASE_APP_ID=your_app_id
+NEXT_PUBLIC_FIREBASE_MEASUREMENT_ID=your_measurement_id
+
+# AI Generation
+NVIDIA_API_KEY=nvapi-your_nvidia_api_key
 ```
 
 ### 3. Database Setup
@@ -133,49 +129,34 @@ Run the schema on your Supabase project:
 
 ```bash
 node run-schema.js
-# or paste schema.sql directly into Supabase SQL Editor
+# or paste schema.sql directly into the Supabase SQL Editor
 ```
 
-### 4. Run
+### 4. Run Locally
 
 ```bash
 npm run dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000)
+Open [http://localhost:3000](http://localhost:3000) in your browser.
 
 ---
 
 ## 📁 Project Structure
 
-```
+```text
 heart2heart/
 ├── app/
-│   ├── (app)/                    # Authenticated app routes
-│   │   ├── dashboard/            # Main dashboard with tasks, mood, partner status
-│   │   ├── connect/              # Partner linking via invite codes
-│   │   ├── onboarding/           # Love language & comfort level setup
-│   │   ├── settings/             # Preferences, notifications, relationship config
-│   │   └── timeline/             # Activity history & connection score trends
+│   ├── (app)/                    # Authenticated app routes (dashboard, connect, settings)
 │   ├── (auth)/                   # Auth routes (login, register)
-│   ├── api/                      # Backend API routes
-│   │   ├── generate-task/        # AI-powered task generation (NVIDIA)
-│   │   ├── tasks/                # CRUD for daily tasks
-│   │   ├── couples/              # Couple creation & joining
-│   │   ├── mood/                 # Mood check-in endpoints
-│   │   ├── auth/sync/            # Firebase ↔ Supabase user sync
-│   │   └── admin/                # Admin panel APIs
-│   └── components/
-│       ├── landing/              # Landing page (Hero, Features, Testimonials)
-│       └── dashboard/            # Dashboard components (TaskCard, MoodSelector, etc.)
+│   ├── api/                      # Backend Next.js API routes
+│   └── components/               # Reusable React components
 ├── lib/
-│   ├── auth/                     # Firebase Admin token verification, auth middleware
-│   ├── supabase/                 # Supabase client + admin (lazy init for Vercel)
-│   └── ai/                       # AI operation logging
-├── utils/
-│   ├── firebase/client.ts        # Firebase client SDK config
-│   └── sound.ts                  # Audio engine with preference-aware playback
-└── schema.sql                    # Full Postgres schema with RLS policies
+│   ├── auth/                     # Firebase token verification, sync, auth middleware
+│   ├── supabase/                 # Supabase client configurations
+│   └── ai/                       # AI operation utilities
+├── utils/                        # Frontend utilities (Firebase client config, sound)
+└── schema.sql                    # Full Postgres schema
 ```
 
 ---
@@ -192,42 +173,41 @@ graph LR
     F --> G[Dashboard Card]
 ```
 
-The AI receives a structured prompt combining the user's current emotional state, preferred love language, and relationship comfort level. It returns a JSON payload with:
+The AI receives a structured prompt combining the user's current emotional state, preferred love language, and relationship comfort level. It returns a strict JSON payload with:
 
 - **title** — Short, actionable activity name
 - **description** — Detailed instructions
-- **category** — Activity type (communication, quality time, etc.)
+- **category** — Activity type (e.g., communication, quality time)
 - **intensity** — 1–5 scale matching the couple's comfort level
 
 ---
 
 ## 📊 Connection Score Algorithm
 
-```
+```text
 Score = (Quality × 0.8) + (Consistency × 0.2)
 
 Quality    = Average feedback rating (1–5) normalized to 0–100
 Consistency = min(completedTasks / 30, 1.0) × 100
 ```
 
-The score rewards couples who both **enjoy** their tasks (quality) and **show up** regularly (consistency), with quality weighted 4× higher because a forced routine without joy is counterproductive.
+The score rewards couples who both **enjoy** their tasks (quality) and **show up** regularly (consistency). Quality is weighted higher because a forced routine without joy is counterproductive.
 
 ---
 
-## 🔐 Security
+## 🔐 Security & Reliability
 
-- **Row Level Security (RLS)** on all Supabase tables — users can only access their own data
-- **Firebase Admin SDK** verifies tokens server-side in API routes
-- **Edge middleware** forwards auth headers without exposing secrets
-- **Lazy initialization** — credentials are never evaluated at build time
+- **Firebase Identity Toolkit**: Secure token verification falling back to REST API for robust validation even without Service Account keys.
+- **Robust UUID Mapping**: Deterministic conversion of Firebase UIDs to PostgreSQL UUIDs with strict error handling to prevent database crashes.
+- **Lazy Initialization**: Credentials and connections are only evaluated at runtime, preventing build-time failures.
 
 ---
 
 ## 🚢 Deployment (Vercel)
 
-1. Connect the GitHub repo to [Vercel](https://vercel.com)
-2. Set all environment variables from `.env.local` in Vercel's dashboard
-3. Deploy — the build is pre-verified to pass cleanly
+1. Connect the GitHub repo to [Vercel](https://vercel.com).
+2. Set all environment variables from `.env.local` in Vercel's dashboard.
+3. Deploy — the build is pre-verified to pass cleanly without any TypeScript errors.
 
 ---
 
@@ -239,9 +219,3 @@ Built with ❤️ for the hackathon.
 |---|---|
 | **Chaitanya** | Frontend, UI/UX, Firebase Integration |
 | **Sanigdh** | Backend APIs, Supabase, Auth Flow |
-
----
-
-## 📝 License
-
-This project is built for a hackathon and is not currently licensed for production use.

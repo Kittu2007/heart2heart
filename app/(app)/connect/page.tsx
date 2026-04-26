@@ -1,11 +1,11 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Copy, Check, Link as LinkIcon, HeartHandshake, Loader2, Heart, Sparkles } from 'lucide-react';
+import { Copy, Check, Link as LinkIcon, HeartHandshake, Loader2, Heart, AlertCircle } from 'lucide-react';
 import { auth, db } from '@/utils/firebase/client';
-import { onAuthStateChanged } from 'firebase/auth';
+import { onAuthStateChanged, User } from 'firebase/auth';
 import { playSound, SoundType } from '@/utils/sound';
 import { 
   collection, 
@@ -18,6 +18,16 @@ import {
   serverTimestamp 
 } from 'firebase/firestore';
 
+/* ── Helper: race a promise against a timeout ── */
+function withTimeout<T>(promise: Promise<T>, ms: number, label = "Request"): Promise<T> {
+  return Promise.race([
+    promise,
+    new Promise<never>((_, reject) =>
+      setTimeout(() => reject(new Error(`${label} timed out after ${ms / 1000}s`)), ms)
+    ),
+  ]);
+}
+
 export default function ConnectPage() {
   const router = useRouter();
   const [inviteCode, setInviteCode] = useState('');
@@ -27,8 +37,55 @@ export default function ConnectPage() {
   const [connectionSuccess, setConnectionSuccess] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [isGenerating, setIsGenerating] = useState(true);
-
+  const [codeError, setCodeError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+
+  /* ── Generate or retrieve the user's invite code ── */
+  const fetchOrCreateCode = useCallback(async (user: User) => {
+    setIsGenerating(true);
+    setCodeError(null);
+
+    try {
+      // Use single-field query (no composite index needed)
+      const q = query(
+        collection(db, "couples"),
+        where("partner_a_id", "==", user.uid)
+      );
+      const snapshot = await withTimeout(getDocs(q), 10000, "Fetching invite code");
+
+      // Filter for pending status client-side
+      const pendingDoc = snapshot.docs.find((d) => d.data().status === "pending");
+
+      if (pendingDoc) {
+        setInviteCode(pendingDoc.data().code);
+      } else {
+        // Generate a new 6-char code
+        const newCode = Math.random().toString(36).substring(2, 8).toUpperCase();
+        await withTimeout(
+          addDoc(collection(db, "couples"), {
+            code: newCode,
+            partner_a_id: user.uid,
+            partner_b_id: null,
+            status: "pending",
+            createdAt: serverTimestamp(),
+          }),
+          10000,
+          "Creating invite code"
+        );
+        setInviteCode(newCode);
+      }
+    } catch (err: any) {
+      console.error("Error fetching/creating code:", err);
+      // Show a visible error so the user isn't stuck on a spinner
+      setCodeError(
+        err?.message?.includes("timed out")
+          ? "Request timed out. Check your connection and refresh."
+          : "Could not generate your code. Please refresh the page."
+      );
+    } finally {
+      setIsGenerating(false);
+    }
+  }, []);
 
   // Auth check and fetch code
   useEffect(() => {
@@ -36,44 +93,13 @@ export default function ConnectPage() {
       if (!user) {
         router.push("/login");
       } else {
-        fetchOrCreateCode(user);
         setIsLoading(false);
+        fetchOrCreateCode(user);
       }
     });
 
     return () => unsubscribe();
-  }, [router]);
-
-  const fetchOrCreateCode = async (user: any) => {
-    try {
-        // Check if user already has a pending connection
-        const q = query(
-          collection(db, "couples"), 
-          where("partner_a_id", "==", user.uid),
-          where("status", "==", "pending")
-        );
-        const querySnapshot = await getDocs(q);
-
-        if (!querySnapshot.empty) {
-          setInviteCode(querySnapshot.docs[0].data().code);
-        } else {
-          // Generate new code
-          const newCode = Math.random().toString(36).substring(2, 8).toUpperCase();
-          await addDoc(collection(db, "couples"), {
-            code: newCode,
-            partner_a_id: user.uid,
-            partner_b_id: null,
-            status: "pending",
-            createdAt: serverTimestamp(),
-          });
-          setInviteCode(newCode);
-        }
-      } catch (err) {
-        console.error("Error fetching/creating code:", err);
-      } finally {
-        setIsGenerating(false);
-      }
-    };
+  }, [router, fetchOrCreateCode]);
 
   const handleCopyCode = async () => {
     try {
@@ -94,25 +120,27 @@ export default function ConnectPage() {
     if (!user) return;
 
     setIsConnecting(true);
+    setError(null);
     playSound(SoundType.CLICK);
 
     try {
-      // Query for the couple doc with this code
+      // Single-field query on "code" (no composite index needed)
       const q = query(
-        collection(db, "couples"), 
-        where("code", "==", partnerCode.trim().toUpperCase()),
-        where("status", "==", "pending")
+        collection(db, "couples"),
+        where("code", "==", partnerCode.trim().toUpperCase())
       );
-      const querySnapshot = await getDocs(q);
+      const snapshot = await withTimeout(getDocs(q), 10000, "Looking up partner code");
 
-      if (querySnapshot.empty) {
+      // Filter for pending status client-side
+      const pendingDoc = snapshot.docs.find((d) => d.data().status === "pending");
+
+      if (!pendingDoc) {
         setError("Invalid or expired code.");
         setIsConnecting(false);
         return;
       }
 
-      const coupleDoc = querySnapshot.docs[0];
-      const coupleData = coupleDoc.data();
+      const coupleData = pendingDoc.data();
 
       if (coupleData.partner_a_id === user.uid) {
         setError("You cannot connect with your own code.");
@@ -121,19 +149,25 @@ export default function ConnectPage() {
       }
 
       // Update document to link users
-      await updateDoc(doc(db, "couples", coupleDoc.id), {
-        partner_b_id: user.uid,
-        status: "active",
-        connectedAt: serverTimestamp(),
-      });
+      await withTimeout(
+        updateDoc(doc(db, "couples", pendingDoc.id), {
+          partner_b_id: user.uid,
+          status: "active",
+          connectedAt: serverTimestamp(),
+        }),
+        10000,
+        "Linking accounts"
+      );
 
-      // Update profiles to link to this coupleId
-      await updateDoc(doc(db, "profiles", user.uid), {
-        coupleId: coupleDoc.id
-      });
-      await updateDoc(doc(db, "profiles", coupleData.partner_a_id), {
-        coupleId: coupleDoc.id
-      });
+      // Update profiles to link to this coupleId (best-effort, don't block on failure)
+      try {
+        await Promise.all([
+          updateDoc(doc(db, "profiles", user.uid), { coupleId: pendingDoc.id }),
+          updateDoc(doc(db, "profiles", coupleData.partner_a_id), { coupleId: pendingDoc.id }),
+        ]);
+      } catch (profileErr) {
+        console.warn("Profile link update failed (non-critical):", profileErr);
+      }
 
       setConnectionSuccess(true);
       playSound(SoundType.SUCCESS);
@@ -142,12 +176,21 @@ export default function ConnectPage() {
       setTimeout(() => {
         router.push('/dashboard');
       }, 1500);
-    } catch (error) {
-      console.error("Connection error:", error);
-      setError("Failed to connect. Please try again.");
+    } catch (err: any) {
+      console.error("Connection error:", err);
+      setError(
+        err?.message?.includes("timed out")
+          ? "Request timed out. Check your connection and try again."
+          : "Failed to connect. Please try again."
+      );
     } finally {
       setIsConnecting(false);
     }
+  };
+
+  const handleRetryCodeGeneration = () => {
+    const user = auth.currentUser;
+    if (user) fetchOrCreateCode(user);
   };
 
   if (isLoading) {
@@ -206,18 +249,30 @@ export default function ConnectPage() {
                       <div className="flex-1 bg-background/50 border border-white/10 rounded-xl px-4 py-3 font-mono text-xl tracking-widest text-center min-h-[56px] flex items-center justify-center">
                         {isGenerating ? (
                           <Loader2 className="w-5 h-5 animate-spin text-brand-rose/40" />
+                        ) : codeError ? (
+                          <span className="text-red-400 text-sm font-sans tracking-normal">{codeError}</span>
                         ) : (
-                          inviteCode
+                          inviteCode || '------'
                         )}
                       </div>
-                      <button
-                        onClick={handleCopyCode}
-                        disabled={isGenerating || !inviteCode}
-                        className="bg-brand-rose text-white p-3 rounded-xl hover:bg-brand-rose/90 transition-colors shadow-sm flex items-center justify-center w-12 h-12 flex-shrink-0 disabled:opacity-50"
-                        title="Copy to clipboard"
-                      >
-                        {copied ? <Check size={20} /> : <Copy size={20} />}
-                      </button>
+                      {codeError ? (
+                        <button
+                          onClick={handleRetryCodeGeneration}
+                          className="bg-brand-rose text-white p-3 rounded-xl hover:bg-brand-rose/90 transition-colors shadow-sm flex items-center justify-center w-12 h-12 flex-shrink-0"
+                          title="Retry"
+                        >
+                          <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 12a9 9 0 0 0-9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/><path d="M3 12a9 9 0 0 0 9 9 9.75 9.75 0 0 0 6.74-2.74L21 16"/><path d="M16 21h5v-5"/></svg>
+                        </button>
+                      ) : (
+                        <button
+                          onClick={handleCopyCode}
+                          disabled={isGenerating || !inviteCode}
+                          className="bg-brand-rose text-white p-3 rounded-xl hover:bg-brand-rose/90 transition-colors shadow-sm flex items-center justify-center w-12 h-12 flex-shrink-0 disabled:opacity-50"
+                          title="Copy to clipboard"
+                        >
+                          {copied ? <Check size={20} /> : <Copy size={20} />}
+                        </button>
+                      )}
                     </div>
                   </div>
 
@@ -249,7 +304,8 @@ export default function ConnectPage() {
                     </div>
 
                     {error && (
-                      <div className="bg-red-500/10 border border-red-500/20 text-red-500 text-sm py-2 px-4 rounded-xl">
+                      <div className="bg-red-500/10 border border-red-500/20 text-red-500 text-sm py-2 px-4 rounded-xl flex items-center gap-2">
+                        <AlertCircle size={16} className="flex-shrink-0" />
                         {error}
                       </div>
                     )}
@@ -266,6 +322,7 @@ export default function ConnectPage() {
                       )}
                     </button>
                     <button
+                      type="button"
                       onClick={() => router.push('/dashboard')}
                       className="w-full mt-4 text-[#78716c] text-sm font-medium hover:text-[#1a1c1b] transition-colors py-2"
                     >

@@ -1,11 +1,12 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import TopNavBar from "@/app/components/dashboard/TopNavBar";
 import AddEventModal from "@/components/calendar/AddEventModal";
 import CalendarGrid from "@/components/calendar/CalendarGrid";
 import EventSidebar from "@/components/calendar/EventSidebar";
 import { isUnlocked, isSameDay } from "@/lib/calendar/utils";
+import { backendFetch } from "@/utils/backend/client";
 
 type Event = {
   id: string;
@@ -71,8 +72,57 @@ export default function CalendarPage() {
     new Date(now.getFullYear(), now.getMonth(), 1)
   );
   const [selectedDate, setSelectedDate] = useState(now);
-  const [events, setEvents] = useState<Event[]>(buildSeedEvents);
+  const [events, setEvents] = useState<Event[]>([]);
   const [showModal, setShowModal] = useState(false);
+  const [isLoadingEvents, setIsLoadingEvents] = useState(true);
+  const [isMutating, setIsMutating] = useState(false);
+
+  useEffect(() => {
+    const loadEvents = async () => {
+      try {
+        const res = await backendFetch("/api/calendar-events", { method: "GET" });
+        if (!res.ok) {
+          throw new Error(await res.text());
+        }
+
+        const json = await res.json();
+        const serverEvents = (json.events ?? []) as Event[];
+
+        if (serverEvents.length > 0) {
+          setEvents(serverEvents);
+          return;
+        }
+
+        const seeded = buildSeedEvents();
+        await Promise.all(
+          seeded.map((event) =>
+            backendFetch("/api/calendar-events", {
+              method: "POST",
+              body: JSON.stringify({
+                title: event.title,
+                type: event.type,
+                date: event.date,
+                description: event.description,
+              }),
+            })
+          )
+        );
+
+        const refreshRes = await backendFetch("/api/calendar-events", { method: "GET" });
+        if (!refreshRes.ok) {
+          throw new Error(await refreshRes.text());
+        }
+        const refreshJson = await refreshRes.json();
+        setEvents((refreshJson.events ?? []) as Event[]);
+      } catch (error) {
+        console.error("Failed to load calendar events:", error);
+      } finally {
+        setIsLoadingEvents(false);
+      }
+    };
+
+    void loadEvents();
+  }, []);
 
   const prevMonth = () => {
     setCurrentMonth(
@@ -86,14 +136,52 @@ export default function CalendarPage() {
     );
   };
 
-  const handleAddEvent = (event: Event) => {
-    setEvents((previous) => [...previous, event]);
+  const handleAddEvent = async (event: Event) => {
+    setIsMutating(true);
+    try {
+      const res = await backendFetch("/api/calendar-events", {
+        method: "POST",
+        body: JSON.stringify({
+          title: event.title,
+          type: event.type,
+          date: event.date,
+          description: event.description,
+        }),
+      });
+
+      if (!res.ok) {
+        throw new Error(await res.text());
+      }
+
+      const json = await res.json();
+      if (json.event) {
+        setEvents((previous) => [...previous, json.event as Event]);
+      }
+    } catch (error) {
+      console.error("Failed to add event:", error);
+    } finally {
+      setIsMutating(false);
+    }
   };
 
-  const handleDeleteEvent = (eventId: string) => {
+  const handleDeleteEvent = async (eventId: string) => {
     const confirmed = window.confirm("Delete this event?");
     if (!confirmed) return;
-    setEvents((previous) => previous.filter((event) => event.id !== eventId));
+    setIsMutating(true);
+    try {
+      const res = await backendFetch("/api/calendar-events", {
+        method: "DELETE",
+        body: JSON.stringify({ eventId }),
+      });
+      if (!res.ok) {
+        throw new Error(await res.text());
+      }
+      setEvents((previous) => previous.filter((event) => event.id !== eventId));
+    } catch (error) {
+      console.error("Failed to delete event:", error);
+    } finally {
+      setIsMutating(false);
+    }
   };
 
   const selectedDateIso = makeIsoDate(selectedDate);
@@ -146,12 +234,18 @@ export default function CalendarPage() {
             </header>
 
             <div className="px-5 py-5">
-              <CalendarGrid
-                currentMonth={currentMonth}
-                selectedDate={selectedDate}
-                events={events}
-                onSelectDate={setSelectedDate}
-              />
+              {isLoadingEvents ? (
+                <div className="flex h-[280px] items-center justify-center">
+                  <div className="h-8 w-8 animate-spin rounded-full border-2 border-rose-200 border-t-rose-500" />
+                </div>
+              ) : (
+                <CalendarGrid
+                  currentMonth={currentMonth}
+                  selectedDate={selectedDate}
+                  events={events}
+                  onSelectDate={setSelectedDate}
+                />
+              )}
             </div>
 
             <div className="border-t border-rose-50 px-5 py-4">
@@ -169,7 +263,7 @@ export default function CalendarPage() {
             <EventSidebar
               selectedDate={selectedDate}
               events={events}
-              onAddEvent={() => setShowModal(true)}
+              onAddEvent={() => !isMutating && setShowModal(true)}
               onDeleteEvent={handleDeleteEvent}
             />
           </section>

@@ -288,10 +288,10 @@ export default function DashboardPage() {
         new Promise((_, reject) => setTimeout(() => reject(new Error("Timeout")), 5000))
       ]);
 
-      setPartner((prev) => ({
+      setPartner((prev) => prev ? {
         ...prev,
         taskCompleted: true,
-      }));
+      } : null);
 
       setHasSubmittedFeedback(true);
 

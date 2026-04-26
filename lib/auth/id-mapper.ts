@@ -26,7 +26,7 @@ export function toDbId(uid: string | undefined | null): string {
     hash.substring(0, 8),
     hash.substring(8, 12),
     '4' + hash.substring(13, 16), // Version 4
-    ((parseInt(hash.substring(16, 17), 16) \u0026 0x3) | 0x8).toString(16) + hash.substring(17, 20), // Variant 1
+    ((parseInt(hash.substring(16, 17), 16) & 0x3) | 0x8).toString(16) + hash.substring(17, 20), // Variant 1
     hash.substring(20, 32)
   ].join('-').toLowerCase();
 

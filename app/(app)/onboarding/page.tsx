@@ -67,16 +67,25 @@ export default function OnboardingPage() {
     setIsSubmitting(true);
     try {
       // 1. Save profile to Firestore (legacy support)
-      const savePromise = setDoc(doc(db, "profiles", user.uid), {
-        loveLanguage,
-        communicationStyle: commStyle,
-        comfortLevel,
-        onboardingCompleted: true,
-        updatedAt: serverTimestamp(),
-      }, { merge: true });
+      const saveToFirestore = async () => {
+        try {
+          await Promise.race([
+            setDoc(doc(db, "profiles", user.uid), {
+              loveLanguage,
+              communicationStyle: commStyle,
+              comfortLevel,
+              onboardingCompleted: true,
+              updatedAt: serverTimestamp(),
+            }, { merge: true }),
+            new Promise((_, reject) => setTimeout(() => reject(new Error("Firestore Timeout")), 15000))
+          ]);
+        } catch (e) {
+          console.warn("Firestore save failed or timed out, but proceeding...", e);
+        }
+      };
 
       // 2. Sync profile to Supabase (essential for API routes)
-      const syncProfile = async () => {
+      const syncToSupabase = async () => {
         const token = await user.getIdToken();
         const res = await fetch("/api/auth/sync", {
           method: "POST",
@@ -86,30 +95,33 @@ export default function OnboardingPage() {
           },
           body: JSON.stringify({
             name: user.displayName || "User",
+            // Pass onboarding data directly to sync to ensure it's saved in Supabase
+            onboardingData: {
+              loveLanguage,
+              communicationStyle: commStyle,
+              comfortLevel,
+              onboardingDone: true
+            }
           }),
         });
         if (!res.ok) {
           const data = await res.json();
-          throw new Error(data.error || "Sync failed");
+          throw new Error(data.error || "Supabase Sync failed");
         }
       };
 
-      // Run both in parallel with timeout protection
-      await Promise.all([
+      // Run both but prioritize Supabase sync
+      await Promise.allSettled([
+        saveToFirestore(),
         Promise.race([
-          savePromise,
-          new Promise((_, reject) => setTimeout(() => reject(new Error("Firestore Timeout")), 8000))
-        ]),
-        Promise.race([
-          syncProfile(),
-          new Promise((_, reject) => setTimeout(() => reject(new Error("Sync Timeout")), 8000))
+          syncToSupabase(),
+          new Promise((_, reject) => setTimeout(() => reject(new Error("Sync Timeout")), 15000))
         ])
       ]);
 
       router.push("/connect");
     } catch (error) {
-      console.error("Onboarding completion error:", error);
-      // Proceed to connect anyway, as the connect page now has fallback sync
+      console.error("Onboarding completion fatal error:", error);
       router.push("/connect");
     } finally {
       setIsSubmitting(false);

@@ -11,16 +11,25 @@ export async function syncFirebaseUserToSupabase(
   userData: {
     name: string;
     avatarUrl?: string | null;
+    onboardingDone?: boolean;
+    comfortLevel?: number;
+    loveLanguage?: string | null;
+    communicationStyle?: string | null;
   }
 ): Promise<{ profile: Profile | null; error: unknown }> {
   const dbId = toDbId(firebaseUid);
   console.log('[SYNC] firebase uid:', firebaseUid, '| dbId:', dbId, '| name:', userData.name);
-
-  const payload = {
+  
+  // Basic profile payload
+  const payload: any = {
     id: dbId,
     name: userData.name,
     avatar_url: userData.avatarUrl ?? null,
-  } as ProfileInsert;
+  };
+
+  // Add onboarding fields if provided
+  if (userData.onboardingDone !== undefined) payload.onboarding_done = userData.onboardingDone;
+  if (userData.comfortLevel !== undefined) payload.comfort_level = userData.comfortLevel;
 
   const query = supabaseAdmin.from('profiles') as any;
   const { data: profile, error } = await query
@@ -45,7 +54,9 @@ export async function syncFirebaseUserToSupabase(
         coupleId: (retry as any).couple_id,
         onboardingDone: (retry as any).onboarding_done,
         dbId: dbId,
-        inviteCode: (retry as any).invite_code || undefined
+        inviteCode: (retry as any).invite_code || undefined,
+        loveLanguage: userData.loveLanguage,
+        communicationStyle: userData.communicationStyle
       });
       return { profile: retry as Profile, error: null };
     }
@@ -59,7 +70,9 @@ export async function syncFirebaseUserToSupabase(
     coupleId: profile.couple_id,
     onboardingDone: profile.onboarding_done,
     dbId: dbId,
-    inviteCode: (profile as any).invite_code || undefined
+    inviteCode: (profile as any).invite_code || undefined,
+    loveLanguage: userData.loveLanguage,
+    communicationStyle: userData.communicationStyle
   });
 
   console.log('[SYNC] success, profile dbId:', profile?.id);

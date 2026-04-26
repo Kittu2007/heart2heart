@@ -11,7 +11,15 @@ const JoinSchema = z.object({
 // POST /api/couples/join
 export const POST = withAuth(async (req: NextRequest, user: UserContext) => {
   if (user.coupleId) {
-    return Response.json({ error: 'You are already part of a couple' }, { status: 409 });
+    const { data: couple } = await supabaseAdmin
+      .from('couples')
+      .select('status')
+      .eq('id', user.coupleId)
+      .maybeSingle();
+      
+    if (couple?.status === 'active') {
+      return Response.json({ error: 'You are already part of a couple' }, { status: 409 });
+    }
   }
 
   let body: unknown;

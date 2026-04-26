@@ -7,6 +7,12 @@ import { syncProfileToFirestore } from '@/lib/auth/firestore-sync';
 const SyncSchema = z.object({
   name: z.string().min(1).max(100).trim(),
   avatarUrl: z.string().url().nullable().optional(),
+  onboardingData: z.object({
+    loveLanguage: z.string().nullable().optional(),
+    communicationStyle: z.string().nullable().optional(),
+    comfortLevel: z.number().optional(),
+    onboardingDone: z.boolean().optional(),
+  }).optional(),
 });
 
 export async function POST(req: NextRequest) {
@@ -33,10 +39,11 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  const { name, avatarUrl } = parsed.data;
+  const { name, avatarUrl, onboardingData } = parsed.data;
   const { profile, error } = await syncFirebaseUserToSupabase(firebaseUid, {
     name,
     avatarUrl: avatarUrl ?? null,
+    ...onboardingData, // Spread onboarding data if present
   });
 
   if (error || !profile) {

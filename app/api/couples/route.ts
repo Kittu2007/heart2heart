@@ -24,9 +24,18 @@ async function getUniqueInviteCode(): Promise<string> {
 }
 
 // POST /api/couples — create a new couple or return existing pending one
-export const POST = withAuth(async (req: NextRequest, user: UserContext) => {
+  // If the user has a coupleId, check its status before erroring
   if (user.coupleId) {
-    return Response.json({ error: 'You are already part of a couple' }, { status: 409 });
+    const { data: couple } = await supabaseAdmin
+      .from('couples')
+      .select('status')
+      .eq('id', user.coupleId)
+      .maybeSingle();
+      
+    if (couple?.status === 'active') {
+      return Response.json({ error: 'You are already part of a couple' }, { status: 409 });
+    }
+    // If it's pending, we'll continue and return it in the logic below
   }
 
   try {

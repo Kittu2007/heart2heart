@@ -1,6 +1,14 @@
 import { adminDb } from '../firebase/admin-db';
 
-export async function syncProfileToFirestore(uid: string, data: { name?: string; coupleId?: string | null; onboardingDone?: boolean; dbId?: string; inviteCode?: string }) {
+export async function syncProfileToFirestore(uid: string, data: { 
+  name?: string; 
+  coupleId?: string | null; 
+  onboardingDone?: boolean; 
+  dbId?: string; 
+  inviteCode?: string;
+  loveLanguage?: string | null;
+  communicationStyle?: string | null;
+}) {
   try {
     const profileRef = adminDb.collection('profiles').doc(uid);
     const update: any = {};
@@ -9,6 +17,8 @@ export async function syncProfileToFirestore(uid: string, data: { name?: string;
     if (data.onboardingDone !== undefined) update.onboardingDone = data.onboardingDone;
     if (data.dbId !== undefined) update.dbId = data.dbId;
     if (data.inviteCode !== undefined) update.inviteCode = data.inviteCode;
+    if (data.loveLanguage !== undefined) update.loveLanguage = data.loveLanguage;
+    if (data.communicationStyle !== undefined) update.communicationStyle = data.communicationStyle;
     
     await profileRef.set(update, { merge: true });
     console.log(`[FirestoreSync] Profile ${uid} updated with dbId: ${data.dbId}`);

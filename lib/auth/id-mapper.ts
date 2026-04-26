@@ -9,7 +9,9 @@ import { createHash } from 'crypto';
  * always maps to the same UUID.
  */
 export function toDbId(uid: string | undefined | null): string {
-  if (!uid) return '';
+  if (!uid || uid.trim() === '') {
+    throw new Error('Invalid Firebase UID: Cannot map an empty string to a database UUID.');
+  }
   
   // If it's already a valid UUID format (8-4-4-4-12), return it
   const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;

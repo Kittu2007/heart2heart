@@ -17,15 +17,16 @@ export async function syncFirebaseUserToSupabase(
     communicationStyle?: string | null;
   }
 ): Promise<{ profile: Profile | null; error: unknown }> {
-  const dbId = toDbId(firebaseUid);
-  console.log('[SYNC] firebase uid:', firebaseUid, '| dbId:', dbId, '| name:', userData.name);
-  
-  // Basic profile payload
-  const payload: any = {
-    id: dbId,
-    name: userData.name,
-    avatar_url: userData.avatarUrl ?? null,
-  };
+  try {
+    const dbId = toDbId(firebaseUid);
+    console.log('[SYNC] firebase uid:', firebaseUid, '| dbId:', dbId, '| name:', userData.name);
+    
+    // Basic profile payload
+    const payload: any = {
+      id: dbId,
+      name: userData.name,
+      avatar_url: userData.avatarUrl ?? null,
+    };
 
   // Add onboarding fields if provided
   if (userData.onboardingDone !== undefined) payload.onboarding_done = userData.onboardingDone;
@@ -151,6 +152,10 @@ export async function syncFirebaseUserToSupabase(
   }
 
   return { profile, error: null };
+  } catch (error) {
+    console.error('[SYNC] Uncaught error in syncFirebaseUserToSupabase:', error);
+    return { profile: null, error };
+  }
 }
 
 export async function ensureProfileExists(

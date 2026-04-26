@@ -4,28 +4,42 @@ import { useState, useEffect, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Copy, Check, Link as LinkIcon, HeartHandshake, Loader2, Heart, AlertCircle } from 'lucide-react';
-import { auth, db } from '@/utils/firebase/client';
+import { auth } from '@/utils/firebase/client';
 import { onAuthStateChanged, User } from 'firebase/auth';
 import { playSound, SoundType } from '@/utils/sound';
-import { 
-  collection, 
-  query, 
-  where, 
-  getDocs, 
-  addDoc, 
-  updateDoc, 
-  doc,
-  serverTimestamp 
-} from 'firebase/firestore';
 
-/* ── Helper: race a promise against a timeout ── */
-function withTimeout<T>(promise: Promise<T>, ms: number, label = "Request"): Promise<T> {
-  return Promise.race([
-    promise,
-    new Promise<never>((_, reject) =>
-      setTimeout(() => reject(new Error(`${label} timed out after ${ms / 1000}s`)), ms)
-    ),
-  ]);
+/* ── Helper: authenticated fetch with timeout ── */
+async function authFetch(url: string, options: RequestInit = {}, timeoutMs = 12000) {
+  const user = auth.currentUser;
+  if (!user) throw new Error("Not authenticated");
+
+  const token = await user.getIdToken();
+
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+
+  try {
+    const res = await fetch(url, {
+      ...options,
+      signal: controller.signal,
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${token}`,
+        ...(options.headers || {}),
+      },
+    });
+
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || `Request failed (${res.status})`);
+    return data;
+  } catch (err: any) {
+    if (err.name === "AbortError") {
+      throw new Error("Request timed out. Check your connection and try again.");
+    }
+    throw err;
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 export default function ConnectPage() {
@@ -40,61 +54,38 @@ export default function ConnectPage() {
   const [codeError, setCodeError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
 
-  /* ── Generate or retrieve the user's invite code ── */
-  const fetchOrCreateCode = useCallback(async (user: User) => {
+  /* ── Fetch existing couple or create a new one via API ── */
+  const fetchOrCreateCode = useCallback(async () => {
     setIsGenerating(true);
     setCodeError(null);
 
     try {
-      // Use single-field query (no composite index needed)
-      const q = query(
-        collection(db, "couples"),
-        where("partner_a_id", "==", user.uid)
-      );
-      const snapshot = await withTimeout(getDocs(q), 10000, "Fetching invite code");
+      // 1. Check if user already has a couple
+      const getResult = await authFetch("/api/couples");
 
-      // Filter for pending status client-side
-      const pendingDoc = snapshot.docs.find((d) => d.data().status === "pending");
-
-      if (pendingDoc) {
-        setInviteCode(pendingDoc.data().code);
+      if (getResult.couple && getResult.couple.invite_code) {
+        setInviteCode(getResult.couple.invite_code);
       } else {
-        // Generate a new 6-char code
-        const newCode = Math.random().toString(36).substring(2, 8).toUpperCase();
-        await withTimeout(
-          addDoc(collection(db, "couples"), {
-            code: newCode,
-            partner_a_id: user.uid,
-            partner_b_id: null,
-            status: "pending",
-            createdAt: serverTimestamp(),
-          }),
-          10000,
-          "Creating invite code"
-        );
-        setInviteCode(newCode);
+        // 2. No couple yet — create one
+        const createResult = await authFetch("/api/couples", { method: "POST" });
+        setInviteCode(createResult.couple.inviteCode);
       }
     } catch (err: any) {
       console.error("Error fetching/creating code:", err);
-      // Show a visible error so the user isn't stuck on a spinner
-      setCodeError(
-        err?.message?.includes("timed out")
-          ? "Request timed out. Check your connection and refresh."
-          : "Could not generate your code. Please refresh the page."
-      );
+      setCodeError(err?.message || "Could not generate your code. Please retry.");
     } finally {
       setIsGenerating(false);
     }
   }, []);
 
-  // Auth check and fetch code
+  // Auth check
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, (user) => {
       if (!user) {
         router.push("/login");
       } else {
         setIsLoading(false);
-        fetchOrCreateCode(user);
+        fetchOrCreateCode();
       }
     });
 
@@ -116,81 +107,32 @@ export default function ConnectPage() {
     e.preventDefault();
     if (!partnerCode.trim() || partnerCode.length < 5) return;
 
-    const user = auth.currentUser;
-    if (!user) return;
-
     setIsConnecting(true);
     setError(null);
     playSound(SoundType.CLICK);
 
     try {
-      // Single-field query on "code" (no composite index needed)
-      const q = query(
-        collection(db, "couples"),
-        where("code", "==", partnerCode.trim().toUpperCase())
-      );
-      const snapshot = await withTimeout(getDocs(q), 10000, "Looking up partner code");
-
-      // Filter for pending status client-side
-      const pendingDoc = snapshot.docs.find((d) => d.data().status === "pending");
-
-      if (!pendingDoc) {
-        setError("Invalid or expired code.");
-        setIsConnecting(false);
-        return;
-      }
-
-      const coupleData = pendingDoc.data();
-
-      if (coupleData.partner_a_id === user.uid) {
-        setError("You cannot connect with your own code.");
-        setIsConnecting(false);
-        return;
-      }
-
-      // Update document to link users
-      await withTimeout(
-        updateDoc(doc(db, "couples", pendingDoc.id), {
-          partner_b_id: user.uid,
-          status: "active",
-          connectedAt: serverTimestamp(),
-        }),
-        10000,
-        "Linking accounts"
-      );
-
-      // Update profiles to link to this coupleId (best-effort, don't block on failure)
-      try {
-        await Promise.all([
-          updateDoc(doc(db, "profiles", user.uid), { coupleId: pendingDoc.id }),
-          updateDoc(doc(db, "profiles", coupleData.partner_a_id), { coupleId: pendingDoc.id }),
-        ]);
-      } catch (profileErr) {
-        console.warn("Profile link update failed (non-critical):", profileErr);
-      }
+      await authFetch("/api/couples/join", {
+        method: "POST",
+        body: JSON.stringify({ inviteCode: partnerCode.trim().toUpperCase() }),
+      });
 
       setConnectionSuccess(true);
       playSound(SoundType.SUCCESS);
-      
-      // Route to dashboard after success message
+
       setTimeout(() => {
         router.push('/dashboard');
       }, 1500);
     } catch (err: any) {
       console.error("Connection error:", err);
-      setError(
-        err?.message?.includes("timed out")
-          ? "Request timed out. Check your connection and try again."
-          : "Failed to connect. Please try again."
-      );
+      setError(err?.message || "Failed to connect. Please try again.");
     } finally {
       setIsConnecting(false);
     }
   };
 
   const handleRetryCodeGeneration = () => {
-    const user = auth.currentUser;
-    if (user) fetchOrCreateCode(user);
+    fetchOrCreateCode();
   };
 
   if (isLoading) {
@@ -298,7 +240,7 @@ export default function ConnectPage() {
                         }}
                         placeholder="e.g., B4K79Y"
                         className="glass-input w-full px-4 py-3 rounded-xl border border-white/20 bg-white/5 focus:bg-white/10 focus:border-brand-rose/50 focus:ring-2 focus:ring-brand-rose/20 outline-none transition-all font-mono text-center tracking-widest uppercase placeholder:text-on-surface/30 placeholder:tracking-normal placeholder:normal-case"
-                        maxLength={8}
+                        maxLength={12}
                         disabled={isConnecting}
                       />
                     </div>

@@ -18,23 +18,47 @@ export async function syncFirebaseUserToSupabase(
     id: firebaseUid,
     name: userData.name,
     avatar_url: userData.avatarUrl ?? null,
-    onboarding_done: false,
-    comfort_level: 3,
-    is_admin: false,
+    // Note: couple_id, onboarding_done, and comfort_level are NOT included here
+    // to prevent overwriting existing progress during sync.
   } as ProfileInsert;
 
   console.log('[SYNC] upsert payload:', JSON.stringify(payload));
 
   const query = supabaseAdmin.from('profiles') as any;
   const { data: profile, error } = await query
-    .upsert(payload, { onConflict: 'id', ignoreDuplicates: false })
+    .upsert(payload, { onConflict: 'id', ignoreDuplicates: false }) // false because we DO want to update name/avatar if they changed in Firebase
     .select()
-    .single();
+    .maybeSingle();
 
-  if (error) {
+  if (error || !profile) {
     console.error('[SYNC ERROR] Supabase error:', JSON.stringify(error));
-    return { profile: null, error };
+    
+    // Final fallback: try to fetch even if upsert errored (e.g. race condition)
+    const { data: retry } = await supabaseAdmin
+      .from('profiles')
+      .select('*')
+      .eq('id', firebaseUid)
+      .maybeSingle();
+      
+    if (retry) {
+      // Sync basic info to Firestore even on retry
+      await syncProfileToFirestore(firebaseUid, {
+        name: userData.name,
+        coupleId: (retry as any).couple_id,
+        onboardingDone: (retry as any).onboarding_done
+      });
+      return { profile: retry as Profile, error: null };
+    }
+    
+    return { profile: null, error: error || new Error('Failed to fetch or create profile') };
   }
+
+  // Sync to Firestore
+  await syncProfileToFirestore(firebaseUid, {
+    name: userData.name,
+    coupleId: profile.couple_id,
+    onboardingDone: profile.onboarding_done
+  });
 
   console.log('[SYNC] success, profile id:', profile?.id);
 
@@ -107,23 +131,16 @@ export async function ensureProfileExists(
   name: string
 ): Promise<{ exists: boolean; error: Error | null }> {
   try {
-    const { data: existing } = await supabaseAdmin
-      .from('profiles')
-      .select('id')
-      .eq('id', firebaseUid)
-      .single();
-
-    if (existing) return { exists: true, error: null };
-
     const insertQuery = supabaseAdmin.from('profiles') as any;
-    const { error } = await insertQuery.insert({
+    const { error } = await insertQuery.upsert({
       id: firebaseUid,
       name,
-    } as ProfileInsert);
+    }, { onConflict: 'id', ignoreDuplicates: true });
 
     if (error) throw error;
     return { exists: true, error: null };
   } catch (error) {
+    console.error('[ensureProfileExists] Error:', error);
     return { exists: false, error: error as Error };
   }
 }

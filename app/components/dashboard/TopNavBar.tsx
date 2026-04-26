@@ -3,7 +3,17 @@ import { useState, useEffect } from "react";
 import { auth, db } from "@/utils/firebase/client";
 import { signOut, onAuthStateChanged } from "firebase/auth";
 import { useRouter, usePathname } from "next/navigation";
-import { User, LogOut, Settings, Home, History, Menu, X, ChevronDown } from "lucide-react";
+import {
+  User,
+  LogOut,
+  Settings,
+  Home,
+  History,
+  CalendarDays,
+  Menu,
+  X,
+  ChevronDown,
+} from "lucide-react";
 import { doc, onSnapshot } from "firebase/firestore";
 
 export default function TopNavBar() {
@@ -16,7 +26,6 @@ export default function TopNavBar() {
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, (user) => {
       if (user) {
-        // Listen to profile for name/image
         const profileUnsub = onSnapshot(doc(db, "profiles", user.uid), (docSnap) => {
           if (docSnap.exists()) {
             setUserProfile(docSnap.data());
@@ -42,11 +51,17 @@ export default function TopNavBar() {
 
   const navLinks = [
     { name: "Dashboard", href: "/dashboard", icon: <Home size={18} /> },
+    { name: "Calendar", href: "/calendar", icon: <CalendarDays size={18} /> },
     { name: "Timeline", href: "/timeline", icon: <History size={18} /> },
     { name: "Settings", href: "/settings", icon: <Settings size={18} /> },
   ];
 
-  const userInitial = userProfile?.displayName?.[0] || userProfile?.name?.[0] || auth.currentUser?.displayName?.[0] || auth.currentUser?.email?.[0] || "U";
+  const userInitial =
+    userProfile?.displayName?.[0] ||
+    userProfile?.name?.[0] ||
+    auth.currentUser?.displayName?.[0] ||
+    auth.currentUser?.email?.[0] ||
+    "U";
 
   return (
     <nav
@@ -54,7 +69,6 @@ export default function TopNavBar() {
       className="bg-white/80 backdrop-blur-md sticky top-0 w-full z-50 border-b border-black/5 shadow-sm"
     >
       <div className="max-w-[1200px] mx-auto px-6 h-16 flex items-center justify-between">
-        {/* Logo */}
         <Link
           href="/dashboard"
           className="flex items-center gap-2 text-xl font-bold tracking-tight text-[#1a1c1b] no-underline group"
@@ -62,19 +76,20 @@ export default function TopNavBar() {
           <div className="w-8 h-8 bg-brand-rose rounded-lg flex items-center justify-center text-white shadow-sm group-hover:scale-105 transition-transform">
             <Heart size={18} fill="currentColor" />
           </div>
-          <span>Heart<span className="text-brand-rose">2</span>Heart</span>
+          <span>
+            Heart<span className="text-brand-rose">2</span>Heart
+          </span>
         </Link>
 
-        {/* Desktop Links */}
         <div className="hidden md:flex items-center space-x-1">
           {navLinks.map((link) => (
             <Link
               key={link.href}
               href={link.href}
               className={`px-4 py-2 rounded-xl text-sm font-medium transition-all flex items-center gap-2 ${
-                pathname === link.href 
-                  ? 'bg-brand-rose/10 text-brand-rose' 
-                  : 'text-[#78716c] hover:bg-black/5 hover:text-[#1a1c1b]'
+                pathname === link.href
+                  ? "bg-brand-rose/10 text-brand-rose"
+                  : "text-[#78716c] hover:bg-black/5 hover:text-[#1a1c1b]"
               }`}
             >
               {link.icon}
@@ -83,10 +98,9 @@ export default function TopNavBar() {
           ))}
         </div>
 
-        {/* Right Corner: User Icon & Dropdown */}
         <div className="flex items-center gap-3">
           <div className="relative">
-            <button 
+            <button
               onClick={() => setIsDropdownOpen(!isDropdownOpen)}
               className="flex items-center gap-2 p-1.5 rounded-full hover:bg-black/5 transition-colors focus:outline-none"
             >
@@ -97,26 +111,24 @@ export default function TopNavBar() {
                   userInitial.toUpperCase()
                 )}
               </div>
-              <ChevronDown size={14} className={`text-[#78716c] transition-transform duration-200 ${isDropdownOpen ? 'rotate-180' : ''}`} />
+              <ChevronDown
+                size={14}
+                className={`text-[#78716c] transition-transform duration-200 ${isDropdownOpen ? "rotate-180" : ""}`}
+              />
             </button>
 
             {isDropdownOpen && (
               <>
-                <div 
-                  className="fixed inset-0 z-10" 
-                  onClick={() => setIsDropdownOpen(false)} 
-                />
+                <div className="fixed inset-0 z-10" onClick={() => setIsDropdownOpen(false)} />
                 <div className="absolute right-0 top-11 mt-2 w-64 bg-white rounded-2xl shadow-xl border border-black/5 py-2 z-20 animate-in fade-in zoom-in duration-200">
                   <div className="px-4 py-3 border-b border-black/5 mb-2">
                     <p className="text-sm font-semibold text-[#1a1c1b] truncate">
                       {userProfile?.displayName || userProfile?.name || auth.currentUser?.displayName || "User"}
                     </p>
-                    <p className="text-xs text-[#78716c] truncate">
-                      {auth.currentUser?.email}
-                    </p>
+                    <p className="text-xs text-[#78716c] truncate">{auth.currentUser?.email}</p>
                   </div>
-                  
-                  <Link 
+
+                  <Link
                     href="/settings"
                     onClick={() => setIsDropdownOpen(false)}
                     className="flex items-center gap-3 px-4 py-2.5 text-sm text-[#4a4c4b] hover:bg-black/5 transition-colors"
@@ -124,8 +136,8 @@ export default function TopNavBar() {
                     <User size={16} />
                     Profile Settings
                   </Link>
-                  
-                  <button 
+
+                  <button
                     onClick={handleSignOut}
                     className="w-full flex items-center gap-3 px-4 py-2.5 text-sm text-[#ef4444] hover:bg-red-50 transition-colors mt-1"
                   >
@@ -137,8 +149,7 @@ export default function TopNavBar() {
             )}
           </div>
 
-          {/* Mobile Menu Toggle */}
-          <button 
+          <button
             className="md:hidden p-2 rounded-xl hover:bg-black/5 transition-colors"
             onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)}
           >
@@ -147,7 +158,6 @@ export default function TopNavBar() {
         </div>
       </div>
 
-      {/* Mobile Menu */}
       {isMobileMenuOpen && (
         <div className="md:hidden border-t border-black/5 bg-white animate-in slide-in-from-top duration-300">
           <div className="p-4 space-y-2">
@@ -157,9 +167,9 @@ export default function TopNavBar() {
                 href={link.href}
                 onClick={() => setIsMobileMenuOpen(false)}
                 className={`flex items-center gap-3 px-4 py-3 rounded-xl text-base font-medium transition-colors ${
-                  pathname === link.href 
-                    ? 'bg-brand-rose/10 text-brand-rose' 
-                    : 'text-[#4a4c4b] hover:bg-black/5'
+                  pathname === link.href
+                    ? "bg-brand-rose/10 text-brand-rose"
+                    : "text-[#4a4c4b] hover:bg-black/5"
                 }`}
               >
                 {link.icon}
@@ -167,7 +177,7 @@ export default function TopNavBar() {
               </Link>
             ))}
             <div className="pt-2 mt-2 border-t border-black/5">
-              <button 
+              <button
                 onClick={handleSignOut}
                 className="w-full flex items-center gap-3 px-4 py-3 text-red-500 font-medium hover:bg-red-50 rounded-xl transition-colors"
               >
@@ -182,18 +192,25 @@ export default function TopNavBar() {
   );
 }
 
-// Helper Heart Icon (Internal)
-function Heart({ size = 18, fill = "none", className = "" }: { size?: number; fill?: string; className?: string }) {
+function Heart({
+  size = 18,
+  fill = "none",
+  className = "",
+}: {
+  size?: number;
+  fill?: string;
+  className?: string;
+}) {
   return (
-    <svg 
-      width={size} 
-      height={size} 
-      viewBox="0 0 24 24" 
-      fill={fill} 
-      stroke="currentColor" 
-      strokeWidth="2.5" 
-      strokeLinecap="round" 
-      strokeLinejoin="round" 
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      fill={fill}
+      stroke="currentColor"
+      strokeWidth="2.5"
+      strokeLinecap="round"
+      strokeLinejoin="round"
       className={className}
     >
       <path d="M19 14c1.49-1.46 3-3.21 3-5.5A5.5 5.5 0 0 0 16.5 3c-1.76 0-3 .5-4.5 2-1.5-1.5-2.74-2-4.5-2A5.5 5.5 0 0 0 2 8.5c0 2.3 1.5 4.05 3 5.5l7 7Z" />

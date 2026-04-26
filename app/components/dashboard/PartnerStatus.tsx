@@ -41,7 +41,7 @@ export default function PartnerStatus({
   const currentUserName = currentUser?.name || "You";
   const bothCompleted = currentUserTaskCompleted && partner?.taskCompleted;
 
-  if (isLoading) {
+  if (isLoading || (coupleStatus === 'active' && !partner)) {
     return (
       <div className="col-span-1 md:col-span-2 lg:col-span-1 bg-surface backdrop-blur-apple rounded-[24px] p-6 lg:p-8 shadow-apple-card border border-black/5 flex flex-col gap-5">
         <div className="h-6 w-32 bg-gray-100 rounded-md animate-pulse" />
@@ -368,25 +368,14 @@ export default function PartnerStatus({
         </div>
 
         {/* Action Controls */}
-        <div className="mt-6 flex items-center gap-2">
-          <button
-            onClick={async () => {
-              if (onDisconnect && confirm("Disconnect from partner?")) {
-                setIsActionLoading(true);
-                try {
-                  await onDisconnect();
-                } finally {
-                  setIsActionLoading(false);
-                }
-              }
-            }}
-            disabled={isActionLoading}
-            className="flex-1 py-2.5 px-4 bg-white border border-rose-100 text-rose-500 rounded-xl text-xs font-bold hover:bg-rose-50 transition-all flex items-center justify-center gap-2 active:scale-[0.98] disabled:opacity-50"
+        <div className="mt-6 flex items-center justify-end gap-2">
+          <Link
+            href="/settings"
+            className="p-2.5 bg-black/5 text-[#78716c] rounded-xl hover:bg-black/10 transition-all active:scale-[0.98]"
+            title="Settings"
           >
-            <ShieldAlert size={14} />
-            {isActionLoading ? "Processing..." : "Disconnect Partner"}
-          </button>
-          
+            <ShieldAlert size={16} />
+          </Link>
           <Link
             href="/connect"
             className="p-2.5 bg-black/5 text-[#78716c] rounded-xl hover:bg-black/10 transition-all active:scale-[0.98]"

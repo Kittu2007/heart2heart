@@ -13,6 +13,30 @@ export default function SettingsPage() {
   const [profile, setProfile] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [isDisconnecting, setIsDisconnecting] = useState(false);
+  const [partnerName, setPartnerName] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (profile?.coupleId) {
+      auth.currentUser?.getIdToken().then(token => {
+        fetch('/api/couples', { headers: { Authorization: `Bearer ${token}` } })
+          .then(res => res.json())
+          .then(data => {
+            if (data?.couple) {
+              const currentDbId = profile.dbId;
+              const pA = data.couple.partner_a;
+              const pB = data.couple.partner_b;
+              const partnerInfo = (pA && pA.id !== currentDbId) ? pA : (pB && pB.id !== currentDbId) ? pB : null;
+              if (partnerInfo?.name) {
+                setPartnerName(partnerInfo.name);
+              }
+            }
+          })
+          .catch(err => console.error("Failed to fetch partner name", err));
+      });
+    } else {
+      setPartnerName(null);
+    }
+  }, [profile?.coupleId, profile?.dbId]);
 
   useEffect(() => {
     let unsubProfile: (() => void) | undefined;
@@ -197,7 +221,7 @@ export default function SettingsPage() {
         },
         { 
           label: "Connection Status", 
-          value: profile?.coupleId ? "Linked with Partner" : "Waiting for Connection", 
+          value: profile?.coupleId ? (partnerName ? `Linked with ${partnerName}` : "Linked with Partner") : "Waiting for Connection", 
           action: () => router.push("/connect") 
         },
       ]

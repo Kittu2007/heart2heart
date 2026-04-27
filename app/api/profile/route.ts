@@ -17,7 +17,10 @@ type ProfilePatchPayload = Partial<
   Pick<
     ProfileRow,
     "name" | "avatar_url" | "onboarding_done" | "comfort_level"
-  >
+  > & {
+    notification_enabled?: boolean;
+    sound_enabled?: boolean;
+  }
 >;
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -27,16 +30,27 @@ async function syncProfileToFirestore(
   data: ProfilePatchPayload
 ): Promise<void> {
   try {
+    const firestoreData: any = {
+      ...data,
+      updatedAt: new Date().toISOString(),
+    };
+
+    // For backward compatibility with older client logic that expects preferences.notifications/sound
+    if (data.notification_enabled !== undefined || data.sound_enabled !== undefined) {
+      firestoreData.preferences = {
+        ...(data.notification_enabled !== undefined && { notifications: data.notification_enabled }),
+        ...(data.sound_enabled !== undefined && { sound: data.sound_enabled }),
+      };
+      
+      // Clean up the flat fields if you want, but keeping them is fine too
+      delete firestoreData.notification_enabled;
+      delete firestoreData.sound_enabled;
+    }
+
     await adminDb
       .collection("users")
       .doc(firebaseUid)
-      .set(
-        {
-          ...data,
-          updatedAt: new Date().toISOString(),
-        },
-        { merge: true }
-      );
+      .set(firestoreData, { merge: true });
   } catch (err) {
     console.error("[syncProfileToFirestore] Firestore sync failed:", err);
   }
@@ -73,7 +87,9 @@ export const PATCH = withAuth(async (request: NextRequest, user: UserContext) =>
       "name",
       "avatar_url",
       "onboarding_done",
-      "comfort_level"
+      "comfort_level",
+      "notification_enabled",
+      "sound_enabled"
     ];
 
     const updatePayload: ProfilePatchPayload = {};

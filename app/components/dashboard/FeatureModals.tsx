@@ -2,7 +2,8 @@
 
 import React, { useState, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { X, Calendar, Lock, Image as ImageIcon, Clock, Heart, Gift, Send, Sparkles } from 'lucide-react';
+import { X, Calendar, Lock, Image as ImageIcon, Clock, Heart, Gift, Send, Sparkles, Upload, Camera } from 'lucide-react';
+import { getSupabase } from '@/lib/supabase/client';
 
 // ─── Shared Modal Shell ───────────────────────────────────────────────────────
 
@@ -341,12 +342,51 @@ export function CreateMemoryModal({ isOpen, onClose, onSubmit }: CreateMemoryMod
   const [imageUrl, setImageUrl] = useState('');
   const [mood, setMood] = useState('❤️');
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [uploading, setUploading] = useState(false);
   const [error, setError] = useState('');
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const handleClose = () => {
     setTitle(''); setDescription(''); setMemoryDate(new Date().toISOString().slice(0, 10));
     setImageUrl(''); setMood('❤️'); setError('');
     onClose();
+  };
+
+  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    // Basic validation
+    if (file.size > 5 * 1024 * 1024) {
+      setError('File too large (max 5MB)');
+      return;
+    }
+
+    setUploading(true);
+    setError('');
+    
+    try {
+      const supabase = getSupabase();
+      const fileExt = file.name.split('.').pop();
+      const fileName = `${Math.random().toString(36).substring(2)}-${Date.now()}.${fileExt}`;
+      const filePath = `memories/${fileName}`;
+
+      const { data, error: uploadError } = await supabase.storage
+        .from('memories')
+        .upload(filePath, file);
+
+      if (uploadError) throw uploadError;
+
+      const { data: { publicUrl } } = supabase.storage
+        .from('memories')
+        .getPublicUrl(filePath);
+
+      setImageUrl(publicUrl);
+    } catch (err: any) {
+      setError(err.message || 'Upload failed');
+    } finally {
+      setUploading(false);
+    }
   };
 
   const handleSubmit = async () => {
@@ -433,25 +473,73 @@ export function CreateMemoryModal({ isOpen, onClose, onSubmit }: CreateMemoryMod
           />
         </div>
 
-        {/* Image URL */}
+        {/* Photo Upload */}
         <div>
-          <label className={labelCls}>Photo URL (optional)</label>
-          <input
-            className={inputCls + ' focus:ring-amber-300'}
-            placeholder="https://..."
-            value={imageUrl}
-            onChange={(e) => setImageUrl(e.target.value)}
-          />
-          {imageUrl && (
-            <div className="mt-2 rounded-xl overflow-hidden aspect-video bg-gray-100">
-              <img
-                src={imageUrl}
-                alt="Preview"
-                className="w-full h-full object-cover"
-                onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }}
-              />
+          <label className={labelCls}>Photo</label>
+          <div className="flex flex-col gap-3">
+            <input
+              type="file"
+              accept="image/*"
+              className="hidden"
+              ref={fileInputRef}
+              onChange={handleFileUpload}
+            />
+            
+            {!imageUrl ? (
+              <button
+                type="button"
+                onClick={() => fileInputRef.current?.click()}
+                disabled={uploading}
+                className="w-full aspect-video rounded-2xl border-2 border-dashed border-gray-200 bg-gray-50 flex flex-col items-center justify-center gap-2 hover:bg-gray-100 hover:border-amber-200 transition-all cursor-pointer disabled:opacity-50"
+              >
+                {uploading ? (
+                  <span className="w-6 h-6 border-2 border-amber-500/20 border-t-amber-500 rounded-full animate-spin" />
+                ) : (
+                  <>
+                    <div className="w-10 h-10 rounded-full bg-amber-50 flex items-center justify-center text-amber-500">
+                      <Upload className="w-5 h-5" />
+                    </div>
+                    <span className="text-xs font-bold text-gray-500">Upload Memory Photo</span>
+                  </>
+                )}
+              </button>
+            ) : (
+              <div className="relative rounded-2xl overflow-hidden aspect-video bg-gray-100 border border-amber-100 group">
+                <img
+                  src={imageUrl}
+                  alt="Preview"
+                  className="w-full h-full object-cover"
+                />
+                <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-2">
+                  <button
+                    onClick={() => fileInputRef.current?.click()}
+                    className="w-10 h-10 rounded-full bg-white/20 backdrop-blur-md flex items-center justify-center text-white hover:bg-white/30 transition-all"
+                  >
+                    <Camera className="w-5 h-5" />
+                  </button>
+                  <button
+                    onClick={() => setImageUrl('')}
+                    className="w-10 h-10 rounded-full bg-white/20 backdrop-blur-md flex items-center justify-center text-white hover:bg-white/30 transition-all"
+                  >
+                    <X className="w-5 h-5" />
+                  </button>
+                </div>
+              </div>
+            )}
+            
+            <div className="flex items-center gap-2">
+              <div className="h-[1px] flex-grow bg-gray-100" />
+              <span className="text-[10px] text-gray-400 font-bold uppercase tracking-widest">Or use URL</span>
+              <div className="h-[1px] flex-grow bg-gray-100" />
             </div>
-          )}
+
+            <input
+              className={inputCls + ' focus:ring-amber-300'}
+              placeholder="Paste image link here..."
+              value={imageUrl}
+              onChange={(e) => setImageUrl(e.target.value)}
+            />
+          </div>
         </div>
 
         {error && <p className="text-xs text-red-500 font-medium">{error}</p>}

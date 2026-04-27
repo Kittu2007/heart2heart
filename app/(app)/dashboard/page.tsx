@@ -12,7 +12,7 @@ import TopNavBar from "@/app/components/dashboard/TopNavBar";
 import ConnectionScoreCard from "@/app/components/dashboard/ConnectionScoreCard";
 import DailyTaskCard, { Task } from "@/app/components/dashboard/DailyTaskCard";
 import MoodSelector from "@/app/components/dashboard/MoodSelector";
-import PreferencesList from "@/app/components/dashboard/PreferencesList";
+
 import PartnerStatus from "@/app/components/dashboard/PartnerStatus";
 import FeedbackModal from "@/app/components/dashboard/FeedbackModal";
 import CouplesFeatures from "@/app/components/dashboard/CouplesFeatures";
@@ -449,7 +449,7 @@ export default function DashboardPage() {
             onDisconnect={handleDisconnect} 
             onJoin={handleJoin}
           />
-          <PreferencesList partnerName={partner?.name || "Partner"} coupleId={coupleId} />
+
         </section>
 
         {/* Relational Features Section */}

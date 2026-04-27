@@ -16,7 +16,7 @@ import { playSound, SoundType } from "@/utils/sound";
 
 interface ProfileData {
   id: string;
-  display_name: string | null;
+  name: string | null;
   love_language: string | null;
   comfort_level: number | null;
   notification_enabled: boolean;
@@ -75,7 +75,7 @@ export default function SettingsPage() {
 
       const data: ProfileData = await res.json();
       setProfile(data);
-      setDisplayName(data.display_name ?? "");
+      setDisplayName(data.name ?? "");
       setLoveLanguage(data.love_language ?? "");
       setComfortLevel(data.comfort_level ?? 3);
       setNotificationsEnabled(data.notification_enabled ?? true);
@@ -123,7 +123,7 @@ export default function SettingsPage() {
       const res = await authFetch("/api/profile", {
         method: "PATCH",
         body: JSON.stringify({
-          display_name: displayName.trim() || null,
+          name: displayName.trim() || null,
           love_language: loveLanguage || null,
           comfort_level: comfortLevel,
           notification_enabled: notificationsEnabled,

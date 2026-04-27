@@ -12,6 +12,8 @@ export interface Database {
           onboarding_done: boolean;
           comfort_level: number;
           is_admin: boolean;
+          notification_enabled: boolean;
+          sound_enabled: boolean;
           created_at: string;
         };
         Insert: {
@@ -22,6 +24,8 @@ export interface Database {
           onboarding_done?: boolean;
           comfort_level?: number;
           is_admin?: boolean;
+          notification_enabled?: boolean;
+          sound_enabled?: boolean;
           created_at?: string;
         };
         Update: {
@@ -32,6 +36,8 @@ export interface Database {
           onboarding_done?: boolean;
           comfort_level?: number;
           is_admin?: boolean;
+          notification_enabled?: boolean;
+          sound_enabled?: boolean;
           created_at?: string;
         };
         Relationships: [

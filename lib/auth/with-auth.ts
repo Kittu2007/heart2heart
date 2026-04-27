@@ -47,11 +47,31 @@ export async function getAuthUser(req: NextRequest): Promise<UserContext> {
   }
 
   if (profile) {
+    let coupleId = profile.couple_id;
+
+    // Self-healing: verify the couple exists and the user is a member
+    if (coupleId) {
+      const { data: couple } = await supabaseAdmin
+        .from('couples')
+        .select('id, partner_a_id, partner_b_id, status')
+        .eq('id', coupleId)
+        .maybeSingle();
+
+      if (!couple || (couple.partner_a_id !== profile.id && couple.partner_b_id !== profile.id)) {
+        console.warn(`[Auth] Orhpaned or invalid coupleId ${coupleId} for user ${profile.id}. Clearing...`);
+        await supabaseAdmin
+          .from('profiles')
+          .update({ couple_id: null })
+          .eq('id', profile.id);
+        coupleId = null;
+      }
+    }
+
     return {
       uid: firebaseUid,
       dbId: profile.id,
       name: profile.name,
-      coupleId: profile.couple_id,
+      coupleId: coupleId,
       onboardingDone: profile.onboarding_done,
       comfortLevel: profile.comfort_level,
     };

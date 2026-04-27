@@ -1,7 +1,7 @@
 "use client";
 import { useState } from "react";
 
-import { User, CheckCircle, Clock, Heart, Link as LinkIcon, UserPlus, Sparkles, ShieldAlert } from "lucide-react";
+import { User, CheckCircle, Clock, Heart, Link as LinkIcon, UserPlus, Sparkles, ShieldAlert, RefreshCw } from "lucide-react";
 import Link from "next/link";
 
 interface PartnerStatusProps {
@@ -226,6 +226,13 @@ export default function PartnerStatus({
       <h3 className="text-lg font-semibold text-[#1a1c1b] mb-5 flex items-center gap-2">
         <User size={20} className="text-[#78716c]" />
         Partner Status
+        <button 
+          onClick={() => window.location.reload()} 
+          className="ml-auto p-1.5 hover:bg-black/5 rounded-full text-[#78716c] transition-all"
+          title="Refresh connection"
+        >
+          <RefreshCw size={14} />
+        </button>
       </h3>
 
       <div className="flex flex-col gap-5 flex-grow">

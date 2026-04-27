@@ -46,3 +46,13 @@ export async function syncCoupleToFirestore(coupleId: string, data: { inviteCode
     console.error(`[FirestoreSync] Failed to update couple ${coupleId}:`, err);
   }
 }
+
+export async function deleteCoupleFromFirestore(coupleId: string) {
+  try {
+    const coupleRef = adminDb.collection('couples').doc(coupleId);
+    await coupleRef.delete();
+    console.log(`[FirestoreSync] Couple ${coupleId} deleted from Firestore`);
+  } catch (err) {
+    console.error(`[FirestoreSync] Failed to delete couple ${coupleId}:`, err);
+  }
+}

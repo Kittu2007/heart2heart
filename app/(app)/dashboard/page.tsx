@@ -15,6 +15,7 @@ import MoodSelector from "@/app/components/dashboard/MoodSelector";
 import PreferencesList from "@/app/components/dashboard/PreferencesList";
 import PartnerStatus from "@/app/components/dashboard/PartnerStatus";
 import FeedbackModal from "@/app/components/dashboard/FeedbackModal";
+import CouplesFeatures from "@/app/components/dashboard/CouplesFeatures";
 import { playSound, SoundType } from "@/utils/sound";
 import { HeartHandshake } from "lucide-react";
 
@@ -52,6 +53,7 @@ export default function DashboardPage() {
   const [isFeedbackModalOpen, setIsFeedbackModalOpen] = useState(false);
   const [hasCompletedTask, setHasCompletedTask] = useState(false);
   const [coupleId, setCoupleId] = useState<string | null>(null);
+  const [dbId, setDbId] = useState<string | null>(null);
   const [inviteCode, setInviteCode] = useState<string | null>(null);
   const [coupleStatus, setCoupleStatus] = useState<string | null>(null);
   const [partnerDbId, setPartnerDbId] = useState<string | null>(null);
@@ -68,7 +70,16 @@ export default function DashboardPage() {
       const result = await authFetch("/api/couples");
       const couple = result.couple;
       const currentDbId: string | undefined = result.currentUserDbId;
-      if (!couple) { if (!isPolling) setIsPartnerLoading(false); return; }
+      
+      if (currentDbId) setDbId(currentDbId);
+
+      if (!couple) { 
+        if (!isPolling) setIsPartnerLoading(false); 
+        setCoupleId(null);
+        setCoupleStatus(null);
+        setPartner(null);
+        return; 
+      }
 
       const prevStatus = coupleStatusRef.current;
       const newStatus = couple.status;
@@ -102,7 +113,7 @@ export default function DashboardPage() {
 
       // Populate partner from Supabase immediately when active
       if (newStatus === "active" && partnerProfile) {
-        if (prevStatus !== "active") {
+        if (prevStatus !== "active" && prevStatus !== null) {
           setShowPartnerJoinedToast(true);
           playSound(SoundType.SUCCESS);
           setTimeout(() => setShowPartnerJoinedToast(false), 5000);
@@ -116,7 +127,7 @@ export default function DashboardPage() {
           mood: prev?.mood,
           _lastSeenDate: prev?._lastSeenDate,
         }));
-        // Stop polling
+        // Stop polling if active
         if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null; }
       }
 
@@ -141,15 +152,16 @@ export default function DashboardPage() {
   // ── Primary: Supabase couple fetch + polling ──────────────────────────
   useEffect(() => {
     if (!currentUser || authLoading) return;
+    
     setIsPartnerLoading(true);
     fetchCoupleFromSupabase(false).then(() => {
       if (coupleStatusRef.current !== "active") {
         pollRef.current = setInterval(() => fetchCoupleFromSupabase(true), 5000);
       }
     });
+    
     return () => { if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null; } };
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [currentUser, authLoading]);
+  }, [currentUser, authLoading, fetchCoupleFromSupabase]);
 
   // ── Fetch Daily Task ──────────────────────────────────────────────────
   useEffect(() => {
@@ -177,7 +189,7 @@ export default function DashboardPage() {
       if (!snap.empty) {
         const d = snap.docs[0].data();
         const ls = d.lastSeen?.toDate();
-        setPartner(prev => prev ? { ...prev, isOnline: calcOnline(ls), lastSeen: ls?.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }), _lastSeenDate: ls } : prev);
+        setPartner(prev => prev ? { ...prev, isOnline: calcOnline(ls), lastSeen: ls?.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }), _lastSeenDate: ls, photoUrl: d.photoURL || d.photoUrl || prev.photoUrl } : prev);
       }
     }));
 
@@ -186,14 +198,14 @@ export default function DashboardPage() {
       const today = new Date(); today.setHours(0, 0, 0, 0);
       const hasToday = snap.docs.some(d => { const c = d.data().completedAt?.toDate(); return c && c >= today; });
       setPartner(prev => prev ? { ...prev, taskCompleted: hasToday } : null);
-    }, () => {}));
+    }));
 
     // Mood
     cleanups.push(onSnapshot(query(collection(db, "mood_checkins"), where("userId", "==", partnerDbId)), snap => {
       let latest: any = null; let lt = 0;
       snap.docs.forEach(d => { const x = d.data(); if (x.shareWithPartner) { const t = x.timestamp?.toDate()?.getTime() || 0; if (t > lt) { lt = t; latest = x; } } });
       if (latest) setPartner(prev => prev ? { ...prev, mood: latest.mood } : null);
-    }, () => {}));
+    }));
 
     // Online timer
     const ot = setInterval(() => {
@@ -221,31 +233,96 @@ export default function DashboardPage() {
     if (!currentUser) return;
     setIsActionLoading(true);
     try {
-      await Promise.race([addDoc(collection(db, "completed_tasks"), { userId: currentUser.uid, task: dailyTask, reflection, completedAt: serverTimestamp() }), new Promise((_, r) => setTimeout(() => r(new Error("Timeout")), 5000))]);
-    } catch { /* non-fatal */ }
-    setHasCompletedTask(true); setIsFeedbackModalOpen(true); playSound(SoundType.SUCCESS);
-    setIsActionLoading(false);
+      await Promise.race([
+        addDoc(collection(db, "completed_tasks"), { 
+          userId: currentUser.uid, 
+          task: dailyTask, 
+          reflection, 
+          completedAt: serverTimestamp() 
+        }), 
+        new Promise((_, r) => setTimeout(() => r(new Error("Timeout")), 10000))
+      ]);
+      setHasCompletedTask(true); 
+      setIsFeedbackModalOpen(true); 
+      playSound(SoundType.SUCCESS);
+    } catch (error) {
+      console.error("Task completion failed:", error);
+    } finally {
+      setIsActionLoading(false);
+    }
   }, [currentUser, dailyTask, reflection]);
 
   const handleFeedbackSubmit = useCallback(async (feedback: Feedback) => {
-    if (!currentUser) return;
+    if (!currentUser || !coupleId || !dbId) return;
     try {
-      await Promise.race([addDoc(collection(db, "feedback"), { userId: currentUser.uid, taskId: dailyTask.title, rating: feedback.rating, feelingTags: feedback.feelings, comment: feedback.comment, coupleId, submittedAt: serverTimestamp() }), new Promise((_, r) => setTimeout(() => r(new Error("Timeout")), 5000))]);
-    } catch { /* non-fatal */ }
-    setDailyTask({ title: "Meaningful Conversation", description: "Ask your partner what they appreciated most about you today.", category: "connection", intensity: 2 });
-    setHasCompletedTask(false); setIsFeedbackModalOpen(false); setReflection("");
-  }, [currentUser, dailyTask, coupleId]);
+      await Promise.race([
+        addDoc(collection(db, "feedback"), { 
+          userId: dbId, 
+          taskId: dailyTask.title, 
+          rating: feedback.rating, 
+          feelings: feedback.feelings, 
+          comment: feedback.comment, 
+          coupleId, 
+          submittedAt: serverTimestamp() 
+        }), 
+        new Promise((_, r) => setTimeout(() => r(new Error("Timeout")), 10000))
+      ]);
+      
+      // Update mood if feelings were selected
+      if (feedback.feelings.length > 0) {
+        const profileRef = doc(db, "profiles", currentUser.uid);
+        await updateDoc(profileRef, {
+          mood: feedback.feelings[0],
+          lastMoodUpdate: serverTimestamp()
+        });
+      }
+
+      setDailyTask({ 
+        title: "Meaningful Conversation", 
+        description: "Ask your partner what they appreciated most about you today.", 
+        category: "connection", 
+        intensity: 2 
+      });
+      setHasCompletedTask(false); 
+      setIsFeedbackModalOpen(false); 
+      setReflection("");
+      playSound(SoundType.SUCCESS);
+    } catch (error) {
+      console.error("Feedback submission failed:", error);
+      setIsFeedbackModalOpen(false);
+    }
+  }, [currentUser, dailyTask, coupleId, dbId]);
 
   const handleMoodChange = useCallback(async (mood: string) => {
     setSelectedMood(mood); playSound(SoundType.POP);
     if (!currentUser) return;
-    try { await Promise.race([addDoc(collection(db, "mood_checkins"), { userId: currentUser.uid, mood, shareWithPartner, timestamp: serverTimestamp() }), new Promise((_, r) => setTimeout(() => r(new Error("Timeout")), 5000))]); } catch { /* non-fatal */ }
+    try { 
+      await Promise.race([
+        addDoc(collection(db, "mood_checkins"), { 
+          userId: currentUser.uid, 
+          mood, 
+          shareWithPartner, 
+          timestamp: serverTimestamp() 
+        }), 
+        new Promise((_, r) => setTimeout(() => r(new Error("Timeout")), 5000))
+      ]); 
+    } catch { /* non-fatal */ }
   }, [currentUser, shareWithPartner]);
 
   const handleShareToggle = useCallback(async (shared: boolean) => {
     setShareWithPartner(shared);
     if (!currentUser) return;
-    try { await Promise.race([addDoc(collection(db, "mood_checkins"), { userId: currentUser.uid, mood: selectedMood, shareWithPartner: shared, timestamp: serverTimestamp() }), new Promise((_, r) => setTimeout(() => r(new Error("Timeout")), 5000))]); } catch { /* non-fatal */ }
+    try { 
+      await Promise.race([
+        addDoc(collection(db, "mood_checkins"), { 
+          userId: currentUser.uid, 
+          mood: selectedMood, 
+          shareWithPartner: shared, 
+          timestamp: serverTimestamp() 
+        }), 
+        new Promise((_, r) => setTimeout(() => r(new Error("Timeout")), 5000))
+      ]); 
+    } catch { /* non-fatal */ }
   }, [currentUser, selectedMood]);
 
   const handleUpdateTask = useCallback((t: Task) => setDailyTask(t), []);
@@ -258,9 +335,16 @@ export default function DashboardPage() {
       const res = await fetch("/api/couples", { method: "DELETE", headers: { Authorization: `Bearer ${token}` } });
       if (!res.ok) { const e = await res.json(); throw new Error(e.error || "Failed to disconnect"); }
       playSound(SoundType.SUCCESS);
-      setPartner(null); setCoupleId(null); setCoupleStatus(null); setPartnerDbId(null); coupleStatusRef.current = null;
-    } catch (err: any) { alert(err.message || "Failed to disconnect."); }
-    finally { setIsActionLoading(false); }
+      setPartner(null); 
+      setCoupleId(null); 
+      setCoupleStatus(null); 
+      setPartnerDbId(null); 
+      coupleStatusRef.current = null;
+    } catch (err: any) { 
+      alert(err.message || "Failed to disconnect."); 
+    } finally { 
+      setIsActionLoading(false); 
+    }
   }, [currentUser]);
 
   const handleJoin = useCallback(async (code: string) => {
@@ -268,12 +352,22 @@ export default function DashboardPage() {
     setIsActionLoading(true);
     try {
       const token = await currentUser.getIdToken();
-      const res = await fetch("/api/couples/join", { method: "POST", headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" }, body: JSON.stringify({ inviteCode: code }) });
+      const res = await fetch("/api/couples/join", { 
+        method: "POST", 
+        headers: { 
+          Authorization: `Bearer ${token}`, 
+          "Content-Type": "application/json" 
+        }, 
+        body: JSON.stringify({ inviteCode: code }) 
+      });
       if (!res.ok) { const e = await res.json(); throw new Error(e.error || "Failed to join"); }
       playSound(SoundType.SUCCESS);
       await fetchCoupleFromSupabase(false);
-    } catch (err: any) { alert(err.message || "Failed to join."); }
-    finally { setIsActionLoading(false); }
+    } catch (err: any) { 
+      alert(err.message || "Failed to join."); 
+    } finally { 
+      setIsActionLoading(false); 
+    }
   }, [currentUser, fetchCoupleFromSupabase]);
 
   if (authLoading) return (
@@ -290,22 +384,55 @@ export default function DashboardPage() {
       <main className="flex-grow flex flex-col w-full px-[max(20px,5vw)] py-12 gap-8 max-w-[1200px] mx-auto">
         <section className="w-full grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-[20px]">
           <ConnectionScoreCard score={connectionScore} />
-          <DailyTaskCard task={dailyTask} onUpdateTask={handleUpdateTask} onComplete={handleTaskComplete} isCompleted={hasCompletedTask} reflection={reflection} onReflectionChange={setReflection} />
-          <MoodSelector selectedMood={selectedMood} onMoodChange={handleMoodChange} shareWithPartner={shareWithPartner} onShareToggle={handleShareToggle} />
+          <DailyTaskCard 
+            task={dailyTask} 
+            onUpdateTask={handleUpdateTask} 
+            onComplete={handleTaskComplete} 
+            isCompleted={hasCompletedTask} 
+            reflection={reflection} 
+            onReflectionChange={setReflection} 
+          />
+          <MoodSelector 
+            selectedMood={selectedMood} 
+            onMoodChange={handleMoodChange} 
+            shareWithPartner={shareWithPartner} 
+            onShareToggle={handleShareToggle} 
+          />
           <PartnerStatus
             currentUser={currentUser ? { name: currentUser.displayName || "You", email: currentUser.email || "", photoUrl: currentUser.photoURL || undefined } : null}
-            partner={partner} inviteCode={inviteCode} currentUserTaskCompleted={hasCompletedTask}
-            isLoading={isPartnerLoading} coupleStatus={coupleStatus} onDisconnect={handleDisconnect} onJoin={handleJoin}
+            partner={partner} 
+            inviteCode={inviteCode} 
+            currentUserTaskCompleted={hasCompletedTask}
+            isLoading={isPartnerLoading} 
+            coupleStatus={coupleStatus} 
+            onDisconnect={handleDisconnect} 
+            onJoin={handleJoin}
           />
           <PreferencesList partnerName={partner?.name || "Partner"} coupleId={coupleId} />
         </section>
+
+        {/* Relational Features Section */}
+        <section className="w-full">
+          <CouplesFeatures coupleId={coupleId} dbId={dbId} />
+        </section>
       </main>
-      <FeedbackModal isOpen={isFeedbackModalOpen} onClose={() => setIsFeedbackModalOpen(false)} onSubmit={handleFeedbackSubmit} />
+
+      <FeedbackModal 
+        isOpen={isFeedbackModalOpen} 
+        onClose={() => setIsFeedbackModalOpen(false)} 
+        onSubmit={handleFeedbackSubmit} 
+      />
+
       {showPartnerJoinedToast && (
         <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 animate-in slide-in-from-bottom-4 duration-500">
           <div className="bg-[#1D1D1F] text-white px-6 py-4 rounded-2xl shadow-2xl flex items-center gap-3 border border-white/10">
-            <div className="w-8 h-8 bg-green-500/20 rounded-full flex items-center justify-center"><HeartHandshake size={18} className="text-green-400" /></div>
-            <div><p className="font-semibold text-sm">Partner Connected!</p><p className="text-xs text-white/70">You can now track your progress together</p></div>
+            <div className="w-8 h-8 bg-green-500/20 rounded-full flex items-center justify-center">
+              <HeartHandshake size={18} className="text-green-400" />
+            </div>
+            <div>
+              <p className="font-semibold text-sm">Partner Connected!</p>
+              <p className="text-xs text-white/70">You can now track your progress together</p>
+            </div>
           </div>
         </div>
       )}

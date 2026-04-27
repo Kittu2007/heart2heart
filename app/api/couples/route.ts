@@ -3,7 +3,7 @@ import { createHash } from 'crypto';
 import { z } from 'zod';
 import { withAuth, UserContext } from '@/lib/auth/with-auth';
 import { supabaseAdmin } from '@/lib/supabase/admin';
-import { syncProfileToFirestore, syncCoupleToFirestore } from '@/lib/auth/firestore-sync';
+import { syncProfileToFirestore, syncCoupleToFirestore, deleteCoupleFromFirestore } from '@/lib/auth/firestore-sync';
 
 function generateInviteCode(seed?: string): string {
   const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'; // no ambiguous chars
@@ -254,6 +254,7 @@ export const DELETE = withAuth(async (_req: NextRequest, user: UserContext) => {
     // 4. Delete the couple record
     if (coupleId) {
       await couplesQuery.delete().eq('id', coupleId);
+      await deleteCoupleFromFirestore(coupleId);
     }
 
     return Response.json({ message: 'Disconnected successfully' });

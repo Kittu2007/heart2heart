@@ -77,7 +77,7 @@ export default function OnboardingPage() {
               onboardingCompleted: true,
               updatedAt: serverTimestamp(),
             }, { merge: true }),
-            new Promise((_, reject) => setTimeout(() => reject(new Error("Firestore Timeout")), 15000))
+            new Promise((_, reject) => setTimeout(() => reject(new Error("Firestore Timeout")), 30000))
           ]);
         } catch (e) {
           console.warn("Firestore save failed or timed out, but proceeding...", e);
@@ -115,7 +115,7 @@ export default function OnboardingPage() {
         saveToFirestore(),
         Promise.race([
           syncToSupabase(),
-          new Promise((_, reject) => setTimeout(() => reject(new Error("Sync Timeout")), 15000))
+          new Promise((_, reject) => setTimeout(() => reject(new Error("Sync Timeout")), 30000))
         ])
       ]);
 

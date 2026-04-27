@@ -1,241 +1,331 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { onSnapshot, doc, setDoc, updateDoc } from "firebase/firestore";
-import { db, auth } from "@/utils/firebase/client";
-import TopNavBar from "@/app/components/dashboard/TopNavBar";
-import { Settings, User, Heart, Bell, LogOut, ChevronRight } from "lucide-react";
-import { signOut, updateProfile as updateAuthProfile } from "firebase/auth";
+import { useEffect, useState, useCallback } from "react";
 import { useRouter } from "next/navigation";
-import { playSound, SoundType } from "@/utils/sound";
+import { authFetch } from "@/utils/authFetch";
+
+// ─── Types ────────────────────────────────────────────────────────────────────
+
+interface ProfileData {
+  display_name: string | null;
+  love_language: string | null;
+  comfort_level: number | null;
+  notification_enabled: boolean;
+  sound_enabled: boolean;
+  photo_url: string | null;
+  couple_id: string | null;
+}
+
+const LOVE_LANGUAGES = [
+  { value: "words_of_affirmation", label: "Words of Affirmation" },
+  { value: "acts_of_service", label: "Acts of Service" },
+  { value: "receiving_gifts", label: "Receiving Gifts" },
+  { value: "quality_time", label: "Quality Time" },
+  { value: "physical_touch", label: "Physical Touch" },
+];
+
+// ─── Component ────────────────────────────────────────────────────────────────
 
 export default function SettingsPage() {
   const router = useRouter();
-  const [profile, setProfile] = useState<any>(null);
+
+  // Form state
+  const [displayName, setDisplayName] = useState("");
+  const [loveLanguage, setLoveLanguage] = useState("");
+  const [comfortLevel, setComfortLevel] = useState(3);
+  const [notificationsEnabled, setNotificationsEnabled] = useState(true);
+  const [soundEnabled, setSoundEnabled] = useState(true);
+  const [coupleId, setCoupleId] = useState<string | null>(null);
+
+  // UI state
   const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [successMessage, setSuccessMessage] = useState<string | null>(null);
+
+  // Danger Zone state
+  const [leaveConfirming, setLeaveConfirming] = useState(false);
+  const [leaving, setLeaving] = useState(false);
+
+  // ── Load profile from Supabase ─────────────────────────
+
+  const loadProfile = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+
+    try {
+      const res = await authFetch("/api/profile");
+
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        throw new Error(body?.error ?? "Failed to load profile");
+      }
+
+      const profile: ProfileData = await res.json();
+
+      setDisplayName(profile.display_name ?? "");
+      setLoveLanguage(profile.love_language ?? "");
+      setComfortLevel(profile.comfort_level ?? 3);
+      setNotificationsEnabled(profile.notification_enabled ?? true);
+      setSoundEnabled(profile.sound_enabled ?? true);
+      setCoupleId(profile.couple_id ?? null);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : "Failed to load settings";
+      console.error("[SettingsPage] loadProfile error:", err);
+      setError(msg);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
 
   useEffect(() => {
-    const user = auth.currentUser;
-    if (user) {
-      setupListeners(user);
-    }
+    loadProfile();
+  }, [loadProfile]);
 
-    function setupListeners(u: any) {
-      const unsub = onSnapshot(doc(db, "profiles", u.uid), (docSnap) => {
-        if (docSnap.exists()) {
-          setProfile(docSnap.data());
-        } else {
-          setProfile({
-            displayName: u.displayName || "User",
-            email: u.email || "",
-            preferences: {
-              notifications: true,
-              sound: true,
-            }
-          });
-        }
-        setLoading(false);
-      });
-      return unsub;
-    }
+  // ── Save profile ───────────────────────────────────
 
-    const unsubscribeAuth = auth.onAuthStateChanged((u) => {
-      if (!u) {
-        router.push("/login");
-        return;
-      }
-      setupListeners(u);
-    });
+  const handleSave = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setSaving(true);
+    setError(null);
+    setSuccessMessage(null);
 
-    return () => unsubscribeAuth();
-  }, [router]);
-
-  const updateFirebaseProfile = async (updates: any) => {
-    const user = auth.currentUser;
-    if (!user) return;
-    
     try {
-      if (updates.displayName) {
-        await updateAuthProfile(user, { displayName: updates.displayName });
-      }
-      await setDoc(doc(db, "profiles", user.uid), updates, { merge: true });
-    } catch (error) {
-      console.error("Error updating profile:", error);
-      alert("Failed to update profile. Please try again.");
-    }
-  };
-
-  const updatePreference = async (key: string, value: boolean) => {
-    const user = auth.currentUser;
-    if (!user) return;
-    
-    playSound(SoundType.CLICK);
-    try {
-      await updateDoc(doc(db, "profiles", user.uid), {
-        [`preferences.${key}`]: value
+      const res = await authFetch("/api/profile", {
+        method: "PATCH",
+        body: JSON.stringify({
+          display_name: displayName.trim() || null,
+          love_language: loveLanguage || null,
+          comfort_level: comfortLevel,
+          notification_enabled: notificationsEnabled,
+          sound_enabled: soundEnabled,
+        }),
       });
-    } catch (error) {
-      console.error("Error updating preference:", error);
+
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        throw new Error(body?.error ?? "Failed to save settings");
+      }
+
+      setSuccessMessage("Settings saved ✓");
+      setTimeout(() => setSuccessMessage(null), 3000);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : "Failed to save settings";
+      console.error("[SettingsPage] handleSave error:", err);
+      setError(msg);
+    } finally {
+      setSaving(false);
     }
   };
 
-  const handleEditName = () => {
-    const newName = prompt("Enter your new display name:", profile?.displayName || "");
-    if (newName && newName.trim()) {
-      updateFirebaseProfile({ displayName: newName.trim() });
+  // ── Leave Partner flow ────────────────────────────────────────────────────
+
+  const handleLeavePartner = async () => {
+    if (!leaveConfirming) {
+      setLeaveConfirming(true);
+      return;
+    }
+
+    setLeaving(true);
+    setError(null);
+
+    try {
+      const res = await authFetch("/api/couples/leave", { method: "POST" });
+
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        throw new Error(body?.error ?? "Failed to leave couple");
+      }
+
+      setCoupleId(null);
+      setLeaveConfirming(false);
+      setSuccessMessage("You have left the couple. You can connect with a new partner anytime.");
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : "Failed to leave couple";
+      console.error("[SettingsPage] handleLeavePartner error:", err);
+      setError(msg);
+      setLeaveConfirming(false);
+    } finally {
+      setLeaving(false);
     }
   };
 
-  const handleSignOut = async () => {
-    await signOut(auth);
-    router.push("/login");
-  };
+  // ── Render ────────────────────────────────────────────────────────────────
 
-  interface SettingItem {
-    label: string;
-    value?: any;
-    action?: () => void;
-    toggle?: boolean;
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center min-h-[60vh]">
+        <p className="text-muted-foreground animate-pulse">Loading settings…</p>
+      </div>
+    );
   }
 
-  const sections: { title: string; icon: React.ReactNode; items: SettingItem[] }[] = [
-    {
-      title: "Account",
-      icon: <User size={20} className="text-blue-500" />,
-      items: [
-        { 
-          label: "Display Name", 
-          value: profile?.displayName || profile?.name || "User",
-          action: handleEditName
-        },
-        { label: "Email", value: auth.currentUser?.email || profile?.email || "" },
-        { 
-          label: "Your Invite Code", 
-          value: profile?.inviteCode || "Generating...",
-          action: () => {
-            if (profile?.inviteCode) {
-              navigator.clipboard.writeText(profile.inviteCode);
-              playSound(SoundType.SUCCESS);
-            }
-          }
-        },
-      ]
-    },
-    {
-      title: "Relationship",
-      icon: <Heart size={20} className="text-rose-500" />,
-      items: [
-        { 
-          label: "Love Language", 
-          value: profile?.loveLanguage || "Not set",
-          action: () => {
-            const newValue = prompt("Enter your Love Language (e.g., Words of Affirmation, Quality Time, Receiving Gifts, Acts of Service, Physical Touch):", profile?.loveLanguage || "");
-            if (newValue && newValue.trim()) {
-              updateFirebaseProfile({ loveLanguage: newValue.trim() });
-            }
-          }
-        },
-        { 
-          label: "Communication Style", 
-          value: profile?.communicationStyle || "Not set",
-          action: () => {
-             const newValue = prompt("Enter your Communication Style (e.g., Direct & Clear, Emotional & Empathetic, Analytical & Logical):", profile?.communicationStyle || "");
-             if (newValue && newValue.trim()) {
-               updateFirebaseProfile({ communicationStyle: newValue.trim() });
-             }
-          }
-        },
-        { 
-          label: "Partner Connection", 
-          value: profile?.coupleId ? "Connected" : "Not connected", 
-          action: () => router.push("/connect") 
-        },
-      ]
-    },
-    {
-      title: "Preferences",
-      icon: <Bell size={20} className="text-amber-500" />,
-      items: [
-        { 
-          label: "Notifications", 
-          toggle: true, 
-          value: profile?.preferences?.notifications !== false,
-          action: () => updatePreference("notifications", profile?.preferences?.notifications === false)
-        },
-        { 
-          label: "Sound Effects", 
-          toggle: true, 
-          value: profile?.preferences?.sound !== false,
-          action: () => updatePreference("sound", profile?.preferences?.sound === false)
-        },
-      ]
-    }
-  ];
-
   return (
-    <div className="min-h-screen bg-[#F9F9F7]">
-      <TopNavBar />
-      <main className="max-w-[800px] mx-auto px-6 py-12">
+    <div className="container mx-auto px-4 py-8 max-w-2xl space-y-8">
+      <h1 className="text-2xl font-bold">⚙️ Settings</h1>
 
-        <header className="mb-10">
-          <div className="flex items-center gap-3 mb-2">
-            <Settings className="text-[#78716c]" size={24} />
-            <h1 className="text-3xl font-bold text-[#1a1c1b]">Settings</h1>
-          </div>
-          <p className="text-[#78716c]">Manage your account and relationship preferences.</p>
-        </header>
+      {error && (
+        <div className="rounded-md bg-destructive/10 border border-destructive/20 px-4 py-3 text-sm text-destructive">
+          {error}
+        </div>
+      )}
+      {successMessage && (
+        <div className="rounded-md bg-green-500/10 border border-green-500/20 px-4 py-3 text-sm text-green-700 dark:text-green-400">
+          {successMessage}
+        </div>
+      )}
 
-        {loading ? (
-          <div className="flex justify-center py-20">
-            <div className="w-8 h-8 border-2 border-brand-rose/30 border-t-brand-rose rounded-full animate-spin" />
+      {/* ── Profile Form ── */}
+      <form onSubmit={handleSave} className="space-y-6 rounded-xl border bg-card p-6">
+        <h2 className="font-semibold text-lg">Profile & Preferences</h2>
+
+        <div className="space-y-1.5">
+          <label className="text-sm font-medium">Display Name</label>
+          <input
+            type="text"
+            value={displayName}
+            onChange={(e) => setDisplayName(e.target.value)}
+            placeholder="Your name"
+            className="w-full rounded-md border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
+          />
+        </div>
+
+        <div className="space-y-1.5">
+          <label className="text-sm font-medium">Love Language</label>
+          <select
+            value={loveLanguage}
+            onChange={(e) => setLoveLanguage(e.target.value)}
+            className="w-full rounded-md border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
+          >
+            <option value="">— Select your love language —</option>
+            {LOVE_LANGUAGES.map((ll) => (
+              <option key={ll.value} value={ll.value}>
+                {ll.label}
+              </option>
+            ))}
+          </select>
+        </div>
+
+        <div className="space-y-2">
+          <label className="text-sm font-medium">
+            Comfort Level: <span className="font-bold text-primary">{comfortLevel}</span> / 5
+          </label>
+          <input
+            type="range"
+            min={1}
+            max={5}
+            step={1}
+            value={comfortLevel}
+            onChange={(e) => setComfortLevel(Number(e.target.value))}
+            className="w-full accent-primary"
+          />
+          <div className="flex justify-between text-xs text-muted-foreground">
+            <span>💛 Casual</span>
+            <span>❤️🔥 Deep</span>
           </div>
-        ) : (
-          <div className="space-y-8">
-            {sections.map((section) => (
-              <div key={section.title} className="bg-surface rounded-3xl border border-black/5 overflow-hidden shadow-sm">
-                <div className="px-6 py-4 bg-black/[0.01] border-b border-black/5 flex items-center gap-3">
-                  {section.icon}
-                  <h3 className="font-semibold text-[#1a1c1b]">{section.title}</h3>
-                </div>
-                <div className="divide-y divide-black/5">
-                  {section.items.map((item) => (
-                    <div 
-                      key={item.label}
-                      onClick={() => item.action && item.action()}
-                      className={`px-6 py-4 flex items-center justify-between transition-colors ${item.action ? 'hover:bg-black/[0.04] cursor-pointer' : ''}`}
-                    >
-                      <span className="text-[#4a4c4b] font-medium">{item.label}</span>
-                      <div className="flex items-center gap-3">
-                        <span className="text-[#78716c] text-sm">
-                          {typeof item.value === 'boolean' ? (item.value ? 'On' : 'Off') : item.value}
-                        </span>
-                        {item.action && !item.toggle && <ChevronRight size={18} className="text-[#d2d2d7]" />}
-                        {item.toggle && (
-                          <div 
-                            className={`w-10 h-6 rounded-full relative p-1 transition-colors duration-200 ${item.value ? 'bg-brand-rose' : 'bg-[#e5e5e7]'}`}
-                          >
-                            <div 
-                              className={`w-4 h-4 bg-white rounded-full shadow-sm transition-transform duration-200 ${item.value ? 'translate-x-4' : 'translate-x-0'}`} 
-                            />
-                          </div>
-                        )}
-                      </div>
-                    </div>
-                  ))}
+        </div>
+
+        <div className="space-y-3">
+          <ToggleRow
+            label="Push Notifications"
+            description="Get notified when your partner completes a task"
+            checked={notificationsEnabled}
+            onChange={setNotificationsEnabled}
+          />
+          <ToggleRow
+            label="Sound Effects"
+            description="Play audio feedback for interactions"
+            checked={soundEnabled}
+            onChange={setSoundEnabled}
+          />
+        </div>
+
+        <button
+          type="submit"
+          disabled={saving}
+          className="w-full rounded-md bg-primary px-4 py-2.5 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+        >
+          {saving ? "Saving…" : "Save Settings"}
+        </button>
+      </form>
+
+      {/* ── Danger Zone ── */}
+      {coupleId && (
+        <div className="rounded-xl border border-destructive/30 bg-destructive/5 p-6 space-y-4">
+          <div>
+            <h2 className="font-semibold text-lg text-destructive">⚠️ Danger Zone</h2>
+            <p className="text-sm text-muted-foreground mt-1">
+              These actions are irreversible. Please proceed with caution.
+            </p>
+          </div>
+
+          <div className="rounded-lg border border-destructive/20 bg-background p-4 space-y-3">
+            <div>
+              <p className="font-medium text-sm">Leave Partner</p>
+              <p className="text-xs text-muted-foreground mt-0.5">
+                Disconnects you and your partner. Both accounts return to unlinked state.
+              </p>
+            </div>
+
+            {leaveConfirming ? (
+              <div className="space-y-2">
+                <p className="text-xs font-medium text-destructive">
+                  Are you sure? This will disconnect both you and your partner immediately.
+                </p>
+                <div className="flex gap-2">
+                  <button
+                    onClick={handleLeavePartner}
+                    disabled={leaving}
+                    className="flex-1 rounded-md bg-destructive px-3 py-2 text-xs font-semibold text-destructive-foreground hover:bg-destructive/90 disabled:opacity-50 transition-colors"
+                  >
+                    {leaving ? "Leaving…" : "Yes, Leave Partner"}
+                  </button>
+                  <button
+                    onClick={() => setLeaveConfirming(false)}
+                    disabled={leaving}
+                    className="flex-1 rounded-md border px-3 py-2 text-xs font-medium hover:bg-muted transition-colors"
+                  >
+                    Cancel
+                  </button>
                 </div>
               </div>
-            ))}
-
-            <button
-              onClick={handleSignOut}
-              className="w-full bg-white border border-red-100 text-red-500 py-4 rounded-3xl font-semibold flex items-center justify-center gap-2 hover:bg-red-50 transition-colors mt-8"
-            >
-              <LogOut size={20} />
-              Sign Out
-            </button>
+            ) : (
+              <button
+                onClick={handleLeavePartner}
+                className="rounded-md border border-destructive/40 px-4 py-2 text-xs font-medium text-destructive hover:bg-destructive/10 transition-colors"
+              >
+                Leave Partner
+              </button>
+            )}
           </div>
-        )}
-      </main>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function ToggleRow({ label, description, checked, onChange }: { label: string; description: string; checked: boolean; onChange: (v: boolean) => void }) {
+  return (
+    <div className="flex items-center justify-between gap-4">
+      <div className="min-w-0">
+        <p className="text-sm font-medium">{label}</p>
+        <p className="text-xs text-muted-foreground">{description}</p>
+      </div>
+      <button
+        type="button"
+        role="switch"
+        aria-checked={checked}
+        onClick={() => onChange(!checked)}
+        className={`shrink-0 relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 ${
+          checked ? "bg-primary" : "bg-muted"
+        }`}
+      >
+        <span
+          className={`inline-block h-4 w-4 transform rounded-full bg-white shadow-sm transition-transform ${
+            checked ? "translate-x-6" : "translate-x-1"
+          }`}
+        />
+      </button>
     </div>
   );
 }

@@ -1,297 +1,265 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import TopNavBar from "@/app/components/dashboard/TopNavBar";
-import AddEventModal from "@/components/calendar/AddEventModal";
-import CalendarGrid from "@/components/calendar/CalendarGrid";
-import EventSidebar from "@/components/calendar/EventSidebar";
-import { isUnlocked, isSameDay } from "@/lib/calendar/utils";
-import { backendFetch } from "@/utils/backend/client";
+import { useEffect, useState, useCallback } from "react";
+import { authFetch } from "@/utils/authFetch";
 
-type Event = {
+// ─── Types ────────────────────────────────────────────────────────────────────
+
+interface CalendarEvent {
   id: string;
   title: string;
-  type: "date" | "countdown" | "message";
-  date: string;
-  description?: string;
-};
+  description: string | null;
+  start_time: string;      // ISO timestamp
+  end_time: string | null; // ISO timestamp
+  event_type: string;
+  couple_id: string;
+  created_by: string;
+  created_at: string;
+}
 
-const MONTH_NAMES = [
-  "January",
-  "February",
-  "March",
-  "April",
-  "May",
-  "June",
-  "July",
-  "August",
-  "September",
-  "October",
-  "November",
-  "December",
-];
+type NewEventPayload = Omit<CalendarEvent, "id" | "couple_id" | "created_by" | "created_at">;
 
-const makeIsoDate = (date: Date) => date.toISOString().split("T")[0];
-
-const buildSeedEvents = (): Event[] => {
-  const today = new Date();
-  const withOffset = (offsetDays: number) => {
-    const date = new Date(today);
-    date.setDate(date.getDate() + offsetDays);
-    return makeIsoDate(date);
-  };
-
-  return [
-    {
-      id: crypto.randomUUID(),
-      title: "Movie Night 🎬",
-      type: "date",
-      date: withOffset(3),
-      description: "Cozy night in with popcorn and your favorite film.",
-    },
-    {
-      id: crypto.randomUUID(),
-      title: "Anniversary Countdown",
-      type: "countdown",
-      date: withOffset(30),
-      description: "One month until our celebration.",
-    },
-    {
-      id: crypto.randomUUID(),
-      title: "Open on Birthday ❤️",
-      type: "message",
-      date: withOffset(14),
-      description: "A little love letter waiting for you.",
-    },
-  ];
-};
+// ─── Component ────────────────────────────────────────────────────────────────
 
 export default function CalendarPage() {
-  const now = new Date();
-  const [currentMonth, setCurrentMonth] = useState(
-    new Date(now.getFullYear(), now.getMonth(), 1)
-  );
-  const [selectedDate, setSelectedDate] = useState(now);
-  const [events, setEvents] = useState<Event[]>([]);
-  const [showModal, setShowModal] = useState(false);
-  const [isLoadingEvents, setIsLoadingEvents] = useState(true);
-  const [isMutating, setIsMutating] = useState(false);
+  const [events, setEvents] = useState<CalendarEvent[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
-    const loadEvents = async () => {
-      try {
-        const res = await backendFetch("/api/calendar-events", { method: "GET" });
-        if (!res.ok) {
-          throw new Error(await res.text());
-        }
+  // ── Fetch events ──────────────────────────────────────────────────────────
 
-        const json = await res.json();
-        const serverEvents = (json.events ?? []) as Event[];
+  const fetchEvents = useCallback(async () => {
+    setLoading(true);
+    setError(null);
 
-        if (serverEvents.length > 0) {
-          setEvents(serverEvents);
-          return;
-        }
+    try {
+      const res = await authFetch("/api/calendar-events");
 
-        const seeded = buildSeedEvents();
-        await Promise.all(
-          seeded.map((event) =>
-            backendFetch("/api/calendar-events", {
-              method: "POST",
-              body: JSON.stringify({
-                title: event.title,
-                type: event.type,
-                date: event.date,
-                description: event.description,
-              }),
-            })
-          )
-        );
-
-        const refreshRes = await backendFetch("/api/calendar-events", { method: "GET" });
-        if (!refreshRes.ok) {
-          throw new Error(await refreshRes.text());
-        }
-        const refreshJson = await refreshRes.json();
-        setEvents((refreshJson.events ?? []) as Event[]);
-      } catch (error) {
-        console.error("Failed to load calendar events:", error);
-      } finally {
-        setIsLoadingEvents(false);
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        throw new Error(body?.error ?? `Server error: ${res.status}`);
       }
-    };
 
-    void loadEvents();
+      const data: CalendarEvent[] = await res.json();
+      setEvents(data ?? []);
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : "Failed to load calendar events.";
+      console.error("[CalendarPage] fetchEvents error:", err);
+      setError(message);
+    } finally {
+      setLoading(false);
+    }
   }, []);
 
-  const prevMonth = () => {
-    setCurrentMonth(
-      (month) => new Date(month.getFullYear(), month.getMonth() - 1, 1)
-    );
-  };
+  useEffect(() => {
+    fetchEvents();
+  }, [fetchEvents]);
 
-  const nextMonth = () => {
-    setCurrentMonth(
-      (month) => new Date(month.getFullYear(), month.getMonth() + 1, 1)
-    );
-  };
+  // ── Create event ──────────────────────────────────────────────────────────
 
-  const handleAddEvent = async (event: Event) => {
-    setIsMutating(true);
+  const handleCreateEvent = async (payload: NewEventPayload) => {
+    setError(null);
+
     try {
-      const res = await backendFetch("/api/calendar-events", {
+      const res = await authFetch("/api/calendar-events", {
         method: "POST",
-        body: JSON.stringify({
-          title: event.title,
-          type: event.type,
-          date: event.date,
-          description: event.description,
-        }),
+        body: JSON.stringify(payload),
       });
 
       if (!res.ok) {
-        throw new Error(await res.text());
+        const body = await res.json().catch(() => ({}));
+        throw new Error(body?.error ?? `Failed to create event: ${res.status}`);
       }
 
-      const json = await res.json();
-      if (json.event) {
-        setEvents((previous) => [...previous, json.event as Event]);
-      }
-    } catch (error) {
-      console.error("Failed to add event:", error);
-    } finally {
-      setIsMutating(false);
+      // Refresh the list after creation
+      await fetchEvents();
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : "Failed to create event.";
+      console.error("[CalendarPage] handleCreateEvent error:", err);
+      setError(message);
     }
   };
+
+  // ── Delete event ──────────────────────────────────────────────────────────
 
   const handleDeleteEvent = async (eventId: string) => {
-    const confirmed = window.confirm("Delete this event?");
-    if (!confirmed) return;
-    setIsMutating(true);
+    setError(null);
+
     try {
-      const res = await backendFetch("/api/calendar-events", {
+      const res = await authFetch(`/api/calendar-events?id=${eventId}`, {
         method: "DELETE",
-        body: JSON.stringify({ eventId }),
       });
+
       if (!res.ok) {
-        throw new Error(await res.text());
+        const body = await res.json().catch(() => ({}));
+        throw new Error(body?.error ?? `Failed to delete event: ${res.status}`);
       }
-      setEvents((previous) => previous.filter((event) => event.id !== eventId));
-    } catch (error) {
-      console.error("Failed to delete event:", error);
-    } finally {
-      setIsMutating(false);
+
+      setEvents((prev) => prev.filter((e) => e.id !== eventId));
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : "Failed to delete event.";
+      console.error("[CalendarPage] handleDeleteEvent error:", err);
+      setError(message);
     }
   };
 
-  const selectedDateIso = makeIsoDate(selectedDate);
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
+  // ── Render ────────────────────────────────────────────────────────────────
 
-  const totalEvents = events.length;
-  const upcomingEvents = events.filter((event) => {
-    const date = new Date(event.date);
-    date.setHours(0, 0, 0, 0);
-    return date >= today;
-  }).length;
-  const lockedMessages = events.filter(
-    (event) => event.type === "message" && !isUnlocked(event.date)
-  ).length;
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center min-h-[60vh]">
+        <p className="text-muted-foreground animate-pulse">Loading calendar…</p>
+      </div>
+    );
+  }
 
   return (
-    <div className="min-h-screen bg-[#F9F9F7]">
-      <TopNavBar />
+    <div className="container mx-auto px-4 py-8 max-w-4xl">
+      <h1 className="text-2xl font-bold mb-6">📅 Couple Calendar</h1>
 
-      <main className="mx-auto w-full max-w-[1200px] px-6 py-10">
-        <div className="mb-6">
-          <p className="mb-1 text-xs font-semibold uppercase tracking-widest text-brand-rose/70">
-            Your Moments
-          </p>
-          <h1 className="text-3xl font-bold text-[#1a1c1b]">Calendar</h1>
+      {error && (
+        <div className="mb-4 rounded-md bg-destructive/10 border border-destructive/20 px-4 py-3 text-sm text-destructive">
+          {error}
         </div>
+      )}
 
-        <div className="grid grid-cols-1 gap-6 lg:grid-cols-[1fr_340px]">
-          <section className="overflow-hidden rounded-3xl border border-rose-100 bg-white shadow-sm">
-            <header className="flex items-center justify-between bg-gradient-to-r from-rose-400 to-pink-400 px-6 py-5 text-white">
-              <button
-                onClick={prevMonth}
-                className="flex h-9 w-9 items-center justify-center rounded-xl bg-white/20 transition-colors hover:bg-white/30 active:scale-95"
-              >
-                ‹
-              </button>
-              <div className="text-center">
-                <h2 className="text-xl font-bold">
-                  {MONTH_NAMES[currentMonth.getMonth()]}
-                </h2>
-                <p className="text-sm text-rose-100">{currentMonth.getFullYear()}</p>
+      {/* ── Event List ── */}
+      {events.length === 0 ? (
+        <div className="text-center py-16 text-muted-foreground">
+          <p className="text-4xl mb-3">🗓️</p>
+          <p className="font-medium">No events yet.</p>
+          <p className="text-sm mt-1">Add your first couple activity below!</p>
+        </div>
+      ) : (
+        <ul className="space-y-3 mb-8">
+          {events.map((event) => (
+            <li
+              key={event.id}
+              className="rounded-xl border bg-card p-4 flex items-start justify-between gap-4"
+            >
+              <div className="min-w-0">
+                <p className="font-semibold truncate">{event.title}</p>
+                {event.description && (
+                  <p className="text-sm text-muted-foreground mt-0.5 line-clamp-2">
+                    {event.description}
+                  </p>
+                )}
+                <p className="text-xs text-muted-foreground mt-1">
+                  {new Date(event.start_time).toLocaleString()}
+                  {event.end_time && (
+                    <> — {new Date(event.end_time).toLocaleString()}</>
+                  )}
+                </p>
               </div>
               <button
-                onClick={nextMonth}
-                className="flex h-9 w-9 items-center justify-center rounded-xl bg-white/20 transition-colors hover:bg-white/30 active:scale-95"
+                onClick={() => handleDeleteEvent(event.id)}
+                className="shrink-0 text-xs text-destructive hover:underline"
+                aria-label={`Delete event: ${event.title}`}
               >
-                ›
+                Remove
               </button>
-            </header>
-
-            <div className="px-5 py-5">
-              {isLoadingEvents ? (
-                <div className="flex h-[280px] items-center justify-center">
-                  <div className="h-8 w-8 animate-spin rounded-full border-2 border-rose-200 border-t-rose-500" />
-                </div>
-              ) : (
-                <CalendarGrid
-                  currentMonth={currentMonth}
-                  selectedDate={selectedDate}
-                  events={events}
-                  onSelectDate={setSelectedDate}
-                />
-              )}
-            </div>
-
-            <div className="border-t border-rose-50 px-5 py-4">
-              <p className="text-xs text-neutral-500">
-                {events.some((event) =>
-                  isSameDay(new Date(event.date), selectedDate)
-                )
-                  ? "This day has one or more saved moments."
-                  : "Select any date and add a special moment."}
-              </p>
-            </div>
-          </section>
-
-          <section className="max-h-[680px] overflow-y-auto rounded-3xl border border-rose-100 bg-white px-5 py-5 shadow-sm">
-            <EventSidebar
-              selectedDate={selectedDate}
-              events={events}
-              onAddEvent={() => !isMutating && setShowModal(true)}
-              onDeleteEvent={handleDeleteEvent}
-            />
-          </section>
-        </div>
-
-        <section className="mt-6 grid grid-cols-1 gap-4 sm:grid-cols-3">
-          <div className="rounded-3xl bg-gradient-to-r from-rose-400 to-pink-400 p-4 text-white shadow-sm">
-            <p className="text-sm font-semibold opacity-95">Total Events</p>
-            <p className="mt-1 text-3xl font-bold">{totalEvents}</p>
-          </div>
-          <div className="rounded-3xl bg-gradient-to-r from-amber-400 to-orange-400 p-4 text-white shadow-sm">
-            <p className="text-sm font-semibold opacity-95">Upcoming</p>
-            <p className="mt-1 text-3xl font-bold">{upcomingEvents}</p>
-          </div>
-          <div className="rounded-3xl bg-gradient-to-r from-purple-400 to-violet-400 p-4 text-white shadow-sm">
-            <p className="text-sm font-semibold opacity-95">Locked Messages</p>
-            <p className="mt-1 text-3xl font-bold">{lockedMessages}</p>
-          </div>
-        </section>
-      </main>
-
-      {showModal && (
-        <AddEventModal
-          onClose={() => setShowModal(false)}
-          onAdd={handleAddEvent}
-          defaultDate={selectedDateIso}
-        />
+            </li>
+          ))}
+        </ul>
       )}
+
+      {/* ── Quick Add Form ── */}
+      <QuickAddEventForm onSubmit={handleCreateEvent} />
     </div>
+  );
+}
+
+// ─── Quick Add Form ───────────────────────────────────────────────────────────
+
+interface QuickAddEventFormProps {
+  onSubmit: (payload: NewEventPayload) => Promise<void>;
+}
+
+function QuickAddEventForm({ onSubmit }: QuickAddEventFormProps) {
+  const [title, setTitle] = useState("");
+  const [description, setDescription] = useState("");
+  const [startTime, setStartTime] = useState("");
+  const [endTime, setEndTime] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!title.trim() || !startTime) return;
+
+    setSubmitting(true);
+    try {
+      await onSubmit({
+        title: title.trim(),
+        description: description.trim() || null,
+        start_time: new Date(startTime).toISOString(),
+        end_time: endTime ? new Date(endTime).toISOString() : null,
+        event_type: "activity",
+      });
+      // Reset form
+      setTitle("");
+      setDescription("");
+      setStartTime("");
+      setEndTime("");
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  return (
+    <form
+      onSubmit={handleSubmit}
+      className="rounded-xl border bg-card p-5 space-y-3"
+    >
+      <h2 className="font-semibold text-sm uppercase tracking-wider text-muted-foreground">
+        Add Event
+      </h2>
+
+      <input
+        type="text"
+        placeholder="Event title *"
+        value={title}
+        onChange={(e) => setTitle(e.target.value)}
+        required
+        className="w-full rounded-md border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
+      />
+
+      <textarea
+        placeholder="Description (optional)"
+        value={description}
+        onChange={(e) => setDescription(e.target.value)}
+        rows={2}
+        className="w-full rounded-md border bg-background px-3 py-2 text-sm resize-none focus:outline-none focus:ring-2 focus:ring-ring"
+      />
+
+      <div className="grid grid-cols-2 gap-3">
+        <div>
+          <label className="text-xs text-muted-foreground">Start *</label>
+          <input
+            type="datetime-local"
+            value={startTime}
+            onChange={(e) => setStartTime(e.target.value)}
+            required
+            className="mt-1 w-full rounded-md border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
+          />
+        </div>
+        <div>
+          <label className="text-xs text-muted-foreground">End</label>
+          <input
+            type="datetime-local"
+            value={endTime}
+            onChange={(e) => setEndTime(e.target.value)}
+            className="mt-1 w-full rounded-md border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
+          />
+        </div>
+      </div>
+
+      <button
+        type="submit"
+        disabled={submitting || !title.trim() || !startTime}
+        className="w-full rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+      >
+        {submitting ? "Adding…" : "Add Event"}
+      </button>
+    </form>
   );
 }

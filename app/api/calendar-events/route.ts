@@ -1,138 +1,104 @@
-import { NextRequest } from "next/server";
-import { z } from "zod";
-import { withAuth, UserContext } from "@/lib/auth/with-auth";
+import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase/admin";
+import { withAuth, UserContext } from "@/lib/auth/with-auth";
 
-const CreateCalendarEventSchema = z.object({
-  title: z.string().trim().min(1).max(120),
-  type: z.enum(["date", "countdown", "message"]),
-  date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
-  description: z.string().max(1000).optional(),
-});
+// ─── GET /api/calendar-events ─────────────────────────────────────────────────
 
-const DeleteCalendarEventSchema = z.object({
-  eventId: z.string().uuid(),
-});
-
-export const GET = withAuth(async (_req: NextRequest, user: UserContext) => {
+export const GET = withAuth(async (request: NextRequest, user: UserContext) => {
   try {
-    const query = (supabaseAdmin as any).from("calendar_events");
-    let dbQuery = query
-      .select("id, title, type, date, description, created_at")
-      .eq("user_id", user.uid)
-      .order("date", { ascending: true })
-      .order("created_at", { ascending: true });
-
-    if (user.coupleId) {
-      dbQuery = dbQuery.eq("couple_id", user.coupleId);
-    } else {
-      dbQuery = dbQuery.is("couple_id", null);
+    if (!user.coupleId) {
+      return NextResponse.json([], { status: 200 });
     }
 
-    const { data, error } = await dbQuery;
-    if (error) throw error;
+    const { data, error } = await supabaseAdmin
+      .from("calendar_events")
+      .select("*")
+      .eq("couple_id", user.coupleId)
+      .order("date", { ascending: true }); // Using 'date' as per schema.sql
 
-    return Response.json({
-      events: (data || []).map((row: any) => ({
-        id: row.id,
-        title: row.title,
-        type: row.type,
-        date: row.date,
-        description: row.description ?? undefined,
-      })),
-    });
-  } catch (error) {
-    console.error("Get calendar events error:", error);
-    return Response.json({ error: "Failed to fetch calendar events" }, { status: 500 });
+    if (error) {
+      console.error("[GET /api/calendar-events] Supabase error:", error);
+      return NextResponse.json({ error: "Failed to fetch events" }, { status: 500 });
+    }
+
+    // Map DB fields to UI expectation if needed
+    const mappedData = (data || []).map((event: any) => ({
+      ...event,
+      start_time: event.date, // Shim for UI
+    }));
+
+    return NextResponse.json(mappedData, { status: 200 });
+  } catch (err) {
+    console.error("[GET /api/calendar-events] Unexpected error:", err);
+    return NextResponse.json({ error: "Internal server error" }, { status: 500 });
   }
 });
 
-export const POST = withAuth(async (req: NextRequest, user: UserContext) => {
-  let body: unknown;
+// ─── POST /api/calendar-events ────────────────────────────────────────────────
+
+export const POST = withAuth(async (request: NextRequest, user: UserContext) => {
   try {
-    body = await req.json();
-  } catch {
-    return Response.json({ error: "Invalid JSON body" }, { status: 400 });
-  }
+    if (!user.coupleId) {
+      return NextResponse.json({ error: "No partner linked" }, { status: 400 });
+    }
 
-  const parsed = CreateCalendarEventSchema.safeParse(body);
-  if (!parsed.success) {
-    return Response.json(
-      { error: "Invalid request body", details: parsed.error.flatten() },
-      { status: 422 }
-    );
-  }
+    const body = await request.json();
+    const { title, description, start_time, event_type } = body;
 
-  const { title, type, date, description } = parsed.data;
+    if (!title || !start_time) {
+      return NextResponse.json(
+        { error: "title and start_time are required" },
+        { status: 400 }
+      );
+    }
 
-  try {
-    const query = (supabaseAdmin as any).from("calendar_events");
-    const { data, error } = await query
+    const { data, error } = await (supabaseAdmin.from("calendar_events") as any)
       .insert({
-        user_id: user.uid,
-        couple_id: user.coupleId,
         title,
-        type,
-        date,
         description: description ?? null,
+        date: start_time.split('T')[0], // Extract YYYY-MM-DD for DATE column
+        type: event_type === 'activity' ? 'date' : (event_type || 'date'), // Map to schema allowed values
+        couple_id: user.coupleId,
+        user_id: user.dbId,
       })
-      .select("id, title, type, date, description")
+      .select()
       .single();
 
-    if (error) throw error;
+    if (error) {
+      console.error("[POST /api/calendar-events] Supabase error:", error);
+      return NextResponse.json({ error: "Failed to create event" }, { status: 500 });
+    }
 
-    return Response.json(
-      {
-        event: {
-          id: data.id,
-          title: data.title,
-          type: data.type,
-          date: data.date,
-          description: data.description ?? undefined,
-        },
-      },
-      { status: 201 }
-    );
-  } catch (error) {
-    console.error("Create calendar event error:", error);
-    return Response.json({ error: "Failed to create calendar event" }, { status: 500 });
+    return NextResponse.json(data, { status: 201 });
+  } catch (err) {
+    console.error("[POST /api/calendar-events] Unexpected error:", err);
+    return NextResponse.json({ error: "Internal server error" }, { status: 500 });
   }
 });
 
-export const DELETE = withAuth(async (req: NextRequest, user: UserContext) => {
-  let body: unknown;
+// ─── DELETE /api/calendar-events?id={id} ─────────────────────────────────────
+
+export const DELETE = withAuth(async (request: NextRequest, user: UserContext) => {
   try {
-    body = await req.json();
-  } catch {
-    return Response.json({ error: "Invalid JSON body" }, { status: 400 });
-  }
-
-  const parsed = DeleteCalendarEventSchema.safeParse(body);
-  if (!parsed.success) {
-    return Response.json(
-      { error: "Invalid request body", details: parsed.error.flatten() },
-      { status: 422 }
-    );
-  }
-
-  const { eventId } = parsed.data;
-
-  try {
-    const query = (supabaseAdmin as any).from("calendar_events");
-    let dbQuery = query.delete().eq("id", eventId).eq("user_id", user.uid);
-
-    if (user.coupleId) {
-      dbQuery = dbQuery.eq("couple_id", user.coupleId);
-    } else {
-      dbQuery = dbQuery.is("couple_id", null);
+    const eventId = request.nextUrl.searchParams.get("id");
+    if (!eventId) {
+      return NextResponse.json({ error: "Event id is required" }, { status: 400 });
     }
 
-    const { error } = await dbQuery;
-    if (error) throw error;
+    const { error } = await supabaseAdmin
+      .from("calendar_events")
+      .delete()
+      .eq("id", eventId)
+      .eq("user_id", user.dbId);
 
-    return Response.json({ success: true });
-  } catch (error) {
-    console.error("Delete calendar event error:", error);
-    return Response.json({ error: "Failed to delete calendar event" }, { status: 500 });
+    if (error) {
+      console.error("[DELETE /api/calendar-events] Supabase error:", error);
+      return NextResponse.json({ error: "Failed to delete event" }, { status: 500 });
+    }
+
+    return NextResponse.json({ success: true }, { status: 200 });
+  } catch (err) {
+    console.error("[DELETE /api/calendar-events] Unexpected error:", err);
+    return NextResponse.json({ error: "Internal server error" }, { status: 500 });
   }
 });

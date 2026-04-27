@@ -8,7 +8,7 @@ export const GET = withAuth(async (req, user) => {
     return Response.json({ memories: [] });
   }
 
-  const { data: memories, error } = await supabaseAdmin
+  const { data: memories, error } = await (supabaseAdmin as any)
     .from('memories')
     .select('*')
     .eq('couple_id', user.coupleId)
@@ -36,7 +36,7 @@ export const POST = withAuth(async (req, user) => {
       return Response.json({ error: 'Missing required fields' }, { status: 400 });
     }
 
-    const { data: memory, error } = await supabaseAdmin
+    const { data: memory, error } = await (supabaseAdmin as any)
       .from('memories')
       .insert({
         couple_id: user.coupleId,
@@ -44,8 +44,7 @@ export const POST = withAuth(async (req, user) => {
         title,
         description,
         memory_date,
-        image_url,
-        mood
+        image_url
       })
       .select()
       .single();

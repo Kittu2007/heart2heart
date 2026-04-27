@@ -8,7 +8,7 @@ export const GET = withAuth(async (req, user) => {
     return Response.json({ events: [] });
   }
 
-  const { data: events, error } = await supabaseAdmin
+  const { data: events, error } = await (supabaseAdmin as any)
     .from('events')
     .select('*')
     .eq('couple_id', user.coupleId)
@@ -36,7 +36,7 @@ export const POST = withAuth(async (req, user) => {
       return Response.json({ error: 'Missing required fields' }, { status: 400 });
     }
 
-    const { data: event, error } = await supabaseAdmin
+    const { data: event, error } = await (supabaseAdmin as any)
       .from('events')
       .insert({
         couple_id: user.coupleId,

@@ -376,6 +376,126 @@ export interface Database {
           }
         ];
       };
+      events: {
+        Row: {
+          id: string;
+          couple_id: string;
+          created_by: string;
+          title: string;
+          description: string | null;
+          event_type: 'date' | 'countdown' | 'message';
+          event_date: string;
+          created_at: string;
+        };
+        Insert: {
+          id?: string;
+          couple_id: string;
+          created_by: string;
+          title: string;
+          description?: string | null;
+          event_type: 'date' | 'countdown' | 'message';
+          event_date: string;
+          created_at?: string;
+        };
+        Update: {
+          id?: string;
+          couple_id?: string;
+          created_by?: string;
+          title?: string;
+          description?: string | null;
+          event_type?: 'date' | 'countdown' | 'message';
+          event_date?: string;
+          created_at?: string;
+        };
+        Relationships: [
+          {
+            foreignKeyName: 'events_couple_id_fkey';
+            columns: ['couple_id'];
+            isOneToOne: false;
+            referencedRelation: 'couples';
+            referencedColumns: ['id'];
+          }
+        ];
+      };
+      locked_messages: {
+        Row: {
+          id: string;
+          couple_id: string;
+          sender_id: string;
+          content: string;
+          unlock_date: string;
+          is_unlocked: boolean;
+          created_at: string;
+        };
+        Insert: {
+          id?: string;
+          couple_id: string;
+          sender_id: string;
+          content: string;
+          unlock_date: string;
+          is_unlocked?: boolean;
+          created_at?: string;
+        };
+        Update: {
+          id?: string;
+          couple_id?: string;
+          sender_id?: string;
+          content?: string;
+          unlock_date?: string;
+          is_unlocked?: boolean;
+          created_at?: string;
+        };
+        Relationships: [
+          {
+            foreignKeyName: 'locked_messages_couple_id_fkey';
+            columns: ['couple_id'];
+            isOneToOne: false;
+            referencedRelation: 'couples';
+            referencedColumns: ['id'];
+          }
+        ];
+      };
+      memories: {
+        Row: {
+          id: string;
+          couple_id: string;
+          created_by: string;
+          title: string;
+          description: string | null;
+          image_url: string | null;
+          memory_date: string;
+          created_at: string;
+        };
+        Insert: {
+          id?: string;
+          couple_id: string;
+          created_by: string;
+          title: string;
+          description?: string | null;
+          image_url?: string | null;
+          memory_date: string;
+          created_at?: string;
+        };
+        Update: {
+          id?: string;
+          couple_id?: string;
+          created_by?: string;
+          title?: string;
+          description?: string | null;
+          image_url?: string | null;
+          memory_date?: string;
+          created_at?: string;
+        };
+        Relationships: [
+          {
+            foreignKeyName: 'memories_couple_id_fkey';
+            columns: ['couple_id'];
+            isOneToOne: false;
+            referencedRelation: 'couples';
+            referencedColumns: ['id'];
+          }
+        ];
+      };
     };
     Views: Record<string, never>;
     Functions: Record<string, never>;

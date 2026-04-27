@@ -8,7 +8,7 @@ export const GET = withAuth(async (req, user) => {
     return Response.json({ messages: [] });
   }
 
-  const { data: messages, error } = await supabaseAdmin
+  const { data: messages, error } = await (supabaseAdmin as any)
     .from('locked_messages')
     .select('*')
     .eq('couple_id', user.coupleId)
@@ -36,13 +36,13 @@ export const POST = withAuth(async (req, user) => {
       return Response.json({ error: 'Missing required fields' }, { status: 400 });
     }
 
-    const { data: message, error } = await supabaseAdmin
+    const { data: message, error } = await (supabaseAdmin as any)
       .from('locked_messages')
       .insert({
         couple_id: user.coupleId,
         sender_id: user.dbId,
         content,
-        unlock_at,
+        unlock_date: unlock_at,
         is_unlocked: false
       })
       .select()

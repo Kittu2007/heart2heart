@@ -225,7 +225,15 @@ export default function SettingsPage() {
     );
   }
 
-  const sections = [
+  interface SettingsItem {
+    label: string;
+    value: string | boolean;
+    toggle?: boolean;
+    action?: () => void | Promise<void>;
+    component?: React.ReactNode;
+  }
+
+  const sections: { title: string; icon: React.ReactNode; items: SettingsItem[] }[] = [
     {
       title: "Account",
       icon: <User size={20} className="text-blue-500" />,

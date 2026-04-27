@@ -66,15 +66,12 @@ export const POST = withAuth(async (req: NextRequest, user: UserContext) => {
 
     if (updateCoupleError) throw updateCoupleError;
 
-    // Link both profiles to this couple
-    const profilesQuery = supabaseAdmin.from('profiles') as any;
-    const [{ error: e1 }, { error: e2 }] = await Promise.all([
-      profilesQuery.update({ couple_id: couple.id }).eq('id', user.dbId),
-      profilesQuery.update({ couple_id: couple.id }).eq('id', couple.partner_a_id),
-    ]);
+    // Link both profiles to this couple atomically in a single transaction
+    const { error: profilesUpdateError } = await (supabaseAdmin.from('profiles') as any)
+      .update({ couple_id: couple.id })
+      .in('id', [user.dbId, couple.partner_a_id]);
 
-    if (e1) throw e1;
-    if (e2) throw e2;
+    if (profilesUpdateError) throw profilesUpdateError;
 
     // 5. Sync to Firestore
     const syncPromises = [

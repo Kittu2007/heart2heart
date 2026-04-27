@@ -3,7 +3,7 @@ import { withAuth, UserContext } from '@/lib/auth/with-auth';
 import { supabaseAdmin } from '@/lib/supabase/admin';
 
 // GET /api/tasks — fetch today's task for the authenticated user's couple
-export const GET = withAuth(async (_req: NextRequest, user: UserContext) => {
+export const GET = withAuth(async (req: NextRequest, user: UserContext) => {
   if (!user.coupleId) {
     return Response.json(
       { error: 'No couple linked. Create or join a couple first.' },
@@ -25,7 +25,58 @@ export const GET = withAuth(async (_req: NextRequest, user: UserContext) => {
 
     if (error) throw error;
 
-    return Response.json({ task: task ?? null, date: today });
+    let currentTask = task;
+
+    if (!currentTask) {
+      // Seed a daily task on first activation/new day
+      let newTaskData = {
+        title: "Appreciation Moment",
+        description: "Share three things you genuinely appreciate about your partner today.",
+        category: "connection",
+        intensity: 1,
+      };
+
+      try {
+        const aiRes = await fetch(new URL('/api/generate-task', req.url), {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ mood: 'Neutral', loveLanguage: 'Quality Time', comfortLevel: 3 }),
+        });
+        
+        if (aiRes.ok) {
+          const generated = await aiRes.json();
+          if (generated.title && generated.description) {
+            newTaskData = {
+              title: generated.title,
+              description: generated.description,
+              category: generated.category || 'general',
+              intensity: generated.intensity || 2,
+            };
+          }
+        }
+      } catch (err) {
+        console.error('Failed to generate AI task during seeding, using fallback:', err);
+      }
+
+      // Insert the seeded task (fallback or AI)
+      const { data: insertedTask, error: insertError } = await query
+        .insert({
+          couple_id: user.coupleId,
+          generated_date: today,
+          title: newTaskData.title,
+          description: newTaskData.description,
+          category: newTaskData.category,
+          intensity: newTaskData.intensity,
+        })
+        .select('id, title, description, category, intensity, generated_date, completed, ai_reasoning, created_at')
+        .single();
+
+      if (!insertError && insertedTask) {
+        currentTask = insertedTask;
+      }
+    }
+
+    return Response.json({ task: currentTask ?? null, date: today });
   } catch (error) {
     console.error('Get task error:', error);
     return Response.json({ error: 'Failed to fetch task' }, { status: 500 });

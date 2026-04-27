@@ -12,7 +12,7 @@ import Footer from "./components/landing/Footer";
 export const metadata = {
   title: "Heart2Heart — AI-Powered Daily Couple Activities",
   description:
-    "Heart2Heart learns what makes your relationship unique, then generates personalised daily couple activities using Gemini AI. Strengthen your bond one task at a time.",
+    "Heart2Heart learns what makes your relationship unique, then generates personalised daily couple activities using NVIDIA MiniMax AI. Strengthen your bond one task at a time.",
 };
 
 export default function LandingPage() {

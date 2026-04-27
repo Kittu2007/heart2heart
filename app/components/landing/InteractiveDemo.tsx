@@ -30,7 +30,7 @@ const taskMap: Record<string, { title: string; desc: string; cat: string }> = {
 const demoSteps = [
   { num: "1", title: "Pick your love language", desc: "The AI shapes every activity using this — privately, individually." },
   { num: "2", title: "Log your mood", desc: "Share or keep it private. If shared, it adjusts today's task tone in real time." },
-  { num: "3", title: "Rate yesterday's task", desc: "Sentiment-analysed by Gemini and used to improve the next activity." },
+  { num: "3", title: "Rate yesterday's task", desc: "Sentiment-analysed by NVIDIA MiniMax AI and used to improve the next activity." },
 ];
 
 export default function InteractiveDemo() {
@@ -149,7 +149,7 @@ export default function InteractiveDemo() {
           <div className="bg-[rgba(232,39,75,0.04)] border border-[rgba(232,39,75,0.15)] rounded-[18px] p-5 mb-5">
             <div className="text-[10px] font-bold tracking-[0.18em] uppercase text-brand-rose mb-2 flex items-center gap-[6px]">
               <div className="w-[5px] h-[5px] bg-brand-rose rounded-full animate-[pulse-green_2s_infinite]" />
-              Gemini AI — Today&apos;s Task
+              MiniMax AI — Today&apos;s Task
             </div>
             <div className="font-serif text-[16px] font-bold text-[#0D0D12] mb-[6px]">{currentTask.title}</div>
             <div className="text-[13px] text-[rgba(13,13,18,0.6)] leading-[1.6] font-light">{currentTask.desc}</div>

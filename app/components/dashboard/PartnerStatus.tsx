@@ -158,49 +158,52 @@ export default function PartnerStatus({
                 </p>
               )}
 
-              <div className="flex flex-col w-full gap-3 mt-auto">
-                <div className="relative group/input">
-                  <input
-                    type="text"
-                    placeholder="Enter Partner Code"
-                    value={joinCode}
-                    onChange={(e) => setJoinCode(e.target.value.toUpperCase())}
-                    className="w-full bg-black/5 border border-black/5 rounded-xl px-4 py-3 text-sm font-bold tracking-widest placeholder:tracking-normal placeholder:font-medium focus:outline-none focus:ring-2 focus:ring-brand-rose/20 transition-all"
-                  />
-                  {joinCode.length > 0 && (
-                    <button
-                      onClick={async () => {
-                        if (onJoin) {
-                          setIsActionLoading(true);
-                          try {
-                            await onJoin(joinCode);
-                          } finally {
-                            setIsActionLoading(false);
+              {/* Hide connect UI when couple is already active */}
+              {coupleStatus !== 'active' && (
+                <div className="flex flex-col w-full gap-3 mt-auto">
+                  <div className="relative group/input">
+                    <input
+                      type="text"
+                      placeholder="Enter Partner Code"
+                      value={joinCode}
+                      onChange={(e) => setJoinCode(e.target.value.toUpperCase())}
+                      className="w-full bg-black/5 border border-black/5 rounded-xl px-4 py-3 text-sm font-bold tracking-widest placeholder:tracking-normal placeholder:font-medium focus:outline-none focus:ring-2 focus:ring-brand-rose/20 transition-all"
+                    />
+                    {joinCode.length > 0 && (
+                      <button
+                        onClick={async () => {
+                          if (onJoin) {
+                            setIsActionLoading(true);
+                            try {
+                              await onJoin(joinCode);
+                            } finally {
+                              setIsActionLoading(false);
+                            }
                           }
-                        }
-                      }}
-                      disabled={isActionLoading || joinCode.length < 4}
-                      className="absolute right-2 top-2 bottom-2 px-4 bg-brand-rose text-white rounded-lg text-xs font-bold hover:bg-brand-rose-dark transition-all disabled:opacity-50 active:scale-95"
-                    >
-                      {isActionLoading ? "..." : "Join"}
-                    </button>
-                  )}
-                </div>
+                        }}
+                        disabled={isActionLoading || joinCode.length < 4}
+                        className="absolute right-2 top-2 bottom-2 px-4 bg-brand-rose text-white rounded-lg text-xs font-bold hover:bg-brand-rose-dark transition-all disabled:opacity-50 active:scale-95"
+                      >
+                        {isActionLoading ? '...' : 'Join'}
+                      </button>
+                    )}
+                  </div>
 
-                <div className="flex items-center gap-2">
-                  <div className="h-px flex-1 bg-black/5" />
-                  <span className="text-[10px] text-[#78716c] font-bold uppercase tracking-wider">or</span>
-                  <div className="h-px flex-1 bg-black/5" />
-                </div>
+                  <div className="flex items-center gap-2">
+                    <div className="h-px flex-1 bg-black/5" />
+                    <span className="text-[10px] text-[#78716c] font-bold uppercase tracking-wider">or</span>
+                    <div className="h-px flex-1 bg-black/5" />
+                  </div>
 
-                <Link
-                  href="/connect"
-                  className="w-full py-3 px-4 bg-black/5 text-[#1a1c1b] rounded-xl text-sm font-semibold flex items-center justify-center gap-2 hover:bg-black/10 transition-all active:scale-[0.98]"
-                >
-                  <LinkIcon size={16} />
-                  Connection Center
-                </Link>
-              </div>
+                  <Link
+                    href="/connect"
+                    className="w-full py-3 px-4 bg-black/5 text-[#1a1c1b] rounded-xl text-sm font-semibold flex items-center justify-center gap-2 hover:bg-black/10 transition-all active:scale-[0.98]"
+                  >
+                    <LinkIcon size={16} />
+                    Connection Center
+                  </Link>
+                </div>
+              )}
             </>
           )}
         </div>

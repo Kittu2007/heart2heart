@@ -20,6 +20,7 @@ CREATE TABLE IF NOT EXISTS couples (
   created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
+ALTER TABLE profiles DROP CONSTRAINT IF EXISTS fk_profiles_couple;
 ALTER TABLE profiles
   ADD CONSTRAINT fk_profiles_couple
   FOREIGN KEY (couple_id) REFERENCES couples(id) ON DELETE SET NULL;
@@ -45,7 +46,7 @@ CREATE TABLE IF NOT EXISTS daily_tasks (
   category TEXT,
   intensity SMALLINT CHECK (intensity BETWEEN 1 AND 5),
   generated_date DATE NOT NULL,
-  gemini_prompt_hash TEXT,
+  ai_prompt_hash TEXT,
   completed BOOLEAN DEFAULT FALSE,
   ai_reasoning TEXT,
   created_at TIMESTAMPTZ DEFAULT NOW(),
@@ -79,7 +80,7 @@ CREATE TABLE IF NOT EXISTS ai_logs (
   timestamp TIMESTAMPTZ DEFAULT NOW(),
   couple_id UUID REFERENCES couples(id) ON DELETE SET NULL,
   operation_type TEXT NOT NULL,
-  model_used TEXT DEFAULT 'gemini-1.5-flash',
+  model_used TEXT DEFAULT 'minimaxai/minimax-m2.7',
   latency_ms INTEGER,
   status TEXT NOT NULL CHECK (status IN ('success', 'error', 'fallback')),
   error_message TEXT,
@@ -109,6 +110,9 @@ ALTER TABLE ai_logs ENABLE ROW LEVEL SECURITY;
 
 CREATE POLICY "Users can view own profile" ON profiles FOR SELECT USING (auth.uid() = id);
 CREATE POLICY "Users can view partner profile" ON profiles FOR SELECT USING (couple_id IS NOT NULL AND couple_id IN (SELECT couple_id FROM profiles WHERE id = auth.uid()));
+CREATE POLICY "Users can view profiles by invite code lookup" ON profiles FOR SELECT USING (
+  couple_id IN (SELECT id FROM couples WHERE status = 'pending' AND partner_a_id != auth.uid())
+);
 CREATE POLICY "Users can update own profile" ON profiles FOR UPDATE USING (auth.uid() = id) WITH CHECK (auth.uid() = id);
 CREATE POLICY "Users can insert own profile" ON profiles FOR INSERT WITH CHECK (auth.uid() = id);
 
@@ -143,3 +147,22 @@ BEGIN
   RETURN result;
 END;
 $$ LANGUAGE plpgsql;
+
+CREATE TABLE IF NOT EXISTS couple_dates (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  couple_id UUID NOT NULL REFERENCES couples(id) ON DELETE CASCADE,
+  created_by UUID NOT NULL REFERENCES profiles(id),
+  title TEXT NOT NULL,
+  type TEXT NOT NULL,
+  date DATE NOT NULL,
+  note TEXT,
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_couple_dates_couple_id ON couple_dates(couple_id);
+
+ALTER TABLE couple_dates ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY "Users can view couple dates" ON couple_dates FOR SELECT USING (couple_id IN (SELECT couple_id FROM profiles WHERE id = auth.uid()));
+CREATE POLICY "Users can insert couple dates" ON couple_dates FOR INSERT WITH CHECK (couple_id IN (SELECT couple_id FROM profiles WHERE id = auth.uid()) AND created_by = auth.uid());
+CREATE POLICY "Users can delete couple dates" ON couple_dates FOR DELETE USING (couple_id IN (SELECT couple_id FROM profiles WHERE id = auth.uid()));

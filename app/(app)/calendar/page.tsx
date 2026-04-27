@@ -1,23 +1,13 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import TopNavBar from "@/app/components/dashboard/TopNavBar";
 import AddEventModal from "@/components/calendar/AddEventModal";
 import CalendarGrid from "@/components/calendar/CalendarGrid";
 import EventSidebar from "@/components/calendar/EventSidebar";
 import { isUnlocked, isSameDay } from "@/lib/calendar/utils";
 import { useAuth } from "@/lib/contexts/auth-context";
-import { db } from "@/utils/firebase/client";
-import { 
-  collection, 
-  query, 
-  where, 
-  onSnapshot, 
-  addDoc, 
-  deleteDoc, 
-  doc,
-  serverTimestamp 
-} from "firebase/firestore";
+import { auth } from "@/utils/firebase/client";
 
 type Event = {
   id: string;
@@ -34,9 +24,25 @@ const MONTH_NAMES = [
 
 const makeIsoDate = (date: Date) => date.toISOString().split("T")[0];
 
+async function authFetch(url: string, options: RequestInit = {}) {
+  const user = auth.currentUser;
+  if (!user) throw new Error("Not authenticated");
+  const token = await user.getIdToken(true);
+  const res = await fetch(url, {
+    ...options,
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${token}`,
+      ...(options.headers || {}),
+    },
+  });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error || `Request failed (${res.status})`);
+  return data;
+}
+
 export default function CalendarPage() {
   const { user: currentUser } = useAuth();
-  const [coupleId, setCoupleId] = useState<string | null>(null);
 
   const now = new Date();
   const [currentMonth, setCurrentMonth] = useState(
@@ -47,54 +53,24 @@ export default function CalendarPage() {
   const [showModal, setShowModal] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
 
-  // Get coupleId from Firestore profile
-  useEffect(() => {
+  const fetchEvents = useCallback(async () => {
     if (!currentUser) return;
-
-    const unsubProfile = onSnapshot(doc(db, "profiles", currentUser.uid), (docSnap) => {
-      if (docSnap.exists()) {
-        const data = docSnap.data();
-        if (data.coupleId) {
-          setCoupleId(data.coupleId);
-        } else {
-          setCoupleId(null);
-          setIsLoading(false);
-        }
-      } else {
-        setCoupleId(null);
-        setIsLoading(false);
+    setIsLoading(true);
+    try {
+      const data = await authFetch("/api/dates");
+      if (data.events) {
+        setEvents(data.events);
       }
-    });
-
-    return () => unsubProfile();
+    } catch (e) {
+      console.error("Error fetching events:", e);
+    } finally {
+      setIsLoading(false);
+    }
   }, [currentUser]);
 
-  // Sync events from Firestore
   useEffect(() => {
-    if (!currentUser || !coupleId) {
-      return;
-    }
-
-    setIsLoading(true);
-    const q = query(
-      collection(db, "calendar_events"),
-      where("coupleId", "==", coupleId)
-    );
-
-    const unsubscribe = onSnapshot(q, (snapshot) => {
-      const fetchedEvents = snapshot.docs.map(doc => ({
-        id: doc.id,
-        ...doc.data()
-      })) as Event[];
-      setEvents(fetchedEvents);
-      setIsLoading(false);
-    }, (error) => {
-      console.error("Error fetching events:", error);
-      setIsLoading(false);
-    });
-
-    return () => unsubscribe();
-  }, [currentUser, coupleId]);
+    fetchEvents();
+  }, [fetchEvents]);
 
   const prevMonth = () => {
     setCurrentMonth(
@@ -109,21 +85,24 @@ export default function CalendarPage() {
   };
 
   const handleAddEvent = async (eventData: Event) => {
-    if (!coupleId) return;
-    
-    // Remove the client-side id before saving to Firestore
     const { id, ...data } = eventData;
     
+    // Optimistic update
+    const tempId = `temp-${Date.now()}`;
+    setEvents((prev) => [...prev, { ...eventData, id: tempId }]);
+    
     try {
-      await addDoc(collection(db, "calendar_events"), {
-        ...data,
-        coupleId,
-        createdBy: currentUser?.uid,
-        createdAt: serverTimestamp(),
+      const result = await authFetch("/api/dates", {
+        method: "POST",
+        body: JSON.stringify(data),
       });
+      if (result.event) {
+        setEvents((prev) => prev.map((e) => e.id === tempId ? result.event : e));
+      }
     } catch (e) {
       console.error("Error adding event:", e);
       alert("Failed to save event. Please try again.");
+      setEvents((prev) => prev.filter((e) => e.id !== tempId));
     }
   };
 
@@ -131,11 +110,16 @@ export default function CalendarPage() {
     const confirmed = window.confirm("Delete this event?");
     if (!confirmed) return;
     
+    // Optimistic update
+    const previousEvents = [...events];
+    setEvents((prev) => prev.filter((e) => e.id !== eventId));
+    
     try {
-      await deleteDoc(doc(db, "calendar_events", eventId));
+      await authFetch(`/api/dates?id=${eventId}`, { method: "DELETE" });
     } catch (e) {
       console.error("Error deleting event:", e);
       alert("Failed to delete event.");
+      setEvents(previousEvents);
     }
   };
 

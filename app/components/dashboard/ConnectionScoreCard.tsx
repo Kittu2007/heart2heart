@@ -43,13 +43,18 @@ export default function ConnectionScoreCard({ score = 0 }: ConnectionScoreCardPr
       </div>
 
       <div className="flex items-end gap-2 relative z-10 mt-auto">
-        <span
-          className="text-[72px] font-bold leading-none tracking-tighter transition-colors duration-500"
-          style={{ color: score === 0 ? "#a8a29e" : "#1a1c1b" }}
-        >
-          {score}
-        </span>
-        <span className="text-2xl font-semibold text-[#78716c] mb-3">%</span>
+        {score === 0 ? (
+          <span className="text-xl font-medium text-[#a8a29e] mb-2 leading-snug max-w-[200px]">
+            Complete your first task to see your score
+          </span>
+        ) : (
+          <>
+            <span className="text-[72px] font-bold leading-none tracking-tighter transition-colors duration-500 text-[#1a1c1b]">
+              {score}
+            </span>
+            <span className="text-2xl font-semibold text-[#78716c] mb-3">%</span>
+          </>
+        )}
 
         {score > 0 && (
           <div className="flex items-center gap-1 mb-4 ml-2">

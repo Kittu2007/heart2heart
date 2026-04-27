@@ -86,7 +86,7 @@ export default function Footer() {
         <div className="max-w-[1240px] mx-auto flex flex-col md:flex-row justify-between items-center gap-4">
           <div className="text-[12px] text-[rgba(255,255,255,0.18)]">© 2026 Heart2Heart · Vibe Coding Hackathon · All rights reserved</div>
           <div className="flex gap-3">
-            {["Powered by Gemini", "Built on Supabase", "Deployed on Vercel"].map((b) => (
+            {["Powered by NVIDIA MiniMax AI", "Built on Supabase", "Deployed on Vercel"].map((b) => (
               <div key={b} className="bg-[rgba(255,255,255,0.04)] border border-[rgba(255,255,255,0.07)] rounded-full px-[14px] py-[5px] text-[11px] text-[rgba(255,255,255,0.3)]">{b}</div>
             ))}
           </div>

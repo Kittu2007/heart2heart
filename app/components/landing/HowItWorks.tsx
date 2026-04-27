@@ -21,7 +21,7 @@ const steps = [
     num: "03",
     icon: Radio,
     title: "Get your daily AI task",
-    desc: "Every morning, Gemini AI generates one personalised activity — matched to your moods, love languages, and feedback.",
+    desc: "Every morning, NVIDIA MiniMax AI generates one personalised activity — matched to your moods, love languages, and feedback.",
   },
   {
     num: "04",

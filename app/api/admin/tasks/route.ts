@@ -37,7 +37,7 @@ export const GET = withAdminAuth(async (req: NextRequest, admin) => {
     let query = supabaseAdmin
       .from('daily_tasks')
       .select(
-        `id, title, description, category, intensity, generated_date, completed, ai_reasoning, gemini_prompt_hash, created_at,
+        `id, title, description, category, intensity, generated_date, completed, ai_reasoning, ai_prompt_hash, created_at,
         couples!daily_tasks_couple_id_fkey (
           id,
           partner_a:profiles!couples_partner_a_id_fkey (id, name),
@@ -86,7 +86,7 @@ export const PATCH = withAdminAuth(async (req: NextRequest, admin) => {
 
     const query = supabaseAdmin.from('daily_tasks') as any;
     const { data: updated, error: updateError } = await query
-      .update({ ...updates, gemini_prompt_hash: null })
+      .update({ ...updates, ai_prompt_hash: null })
       .eq('id', task_id)
       .select()
       .single();

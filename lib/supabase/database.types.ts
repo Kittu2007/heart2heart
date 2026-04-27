@@ -149,7 +149,7 @@ export interface Database {
           category: string | null;
           intensity: number | null;
           generated_date: string;
-          gemini_prompt_hash: string | null;
+          ai_prompt_hash: string | null;
           completed: boolean;
           ai_reasoning: string | null;
           created_at: string;
@@ -162,7 +162,7 @@ export interface Database {
           category?: string | null;
           intensity?: number | null;
           generated_date: string;
-          gemini_prompt_hash?: string | null;
+          ai_prompt_hash?: string | null;
           completed?: boolean;
           ai_reasoning?: string | null;
           created_at?: string;
@@ -175,7 +175,7 @@ export interface Database {
           category?: string | null;
           intensity?: number | null;
           generated_date?: string;
-          gemini_prompt_hash?: string | null;
+          ai_prompt_hash?: string | null;
           completed?: boolean;
           ai_reasoning?: string | null;
           created_at?: string;
@@ -327,6 +327,54 @@ export interface Database {
           created_at?: string;
         };
         Relationships: [];
+      };
+      couple_dates: {
+        Row: {
+          id: string;
+          couple_id: string;
+          created_by: string;
+          title: string;
+          type: string;
+          date: string;
+          note: string | null;
+          created_at: string;
+        };
+        Insert: {
+          id?: string;
+          couple_id: string;
+          created_by: string;
+          title: string;
+          type: string;
+          date: string;
+          note?: string | null;
+          created_at?: string;
+        };
+        Update: {
+          id?: string;
+          couple_id?: string;
+          created_by?: string;
+          title?: string;
+          type?: string;
+          date?: string;
+          note?: string | null;
+          created_at?: string;
+        };
+        Relationships: [
+          {
+            foreignKeyName: 'couple_dates_couple_id_fkey';
+            columns: ['couple_id'];
+            isOneToOne: false;
+            referencedRelation: 'couples';
+            referencedColumns: ['id'];
+          },
+          {
+            foreignKeyName: 'couple_dates_created_by_fkey';
+            columns: ['created_by'];
+            isOneToOne: false;
+            referencedRelation: 'profiles';
+            referencedColumns: ['id'];
+          }
+        ];
       };
     };
     Views: Record<string, never>;

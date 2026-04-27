@@ -40,7 +40,6 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  console.log('[SYNC] Login sync → firebase_uid:', firebaseUid, '| postgres_uuid:', postgresUuid);
 
   // ── Step 2: Parse + validate body ────────────────────────────────────────
   let body: unknown;
@@ -89,13 +88,6 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  console.log(
-    '[SYNC] ✓ Supabase profile confirmed.',
-    '| firebase_uid:', firebaseUid,
-    '| postgres_uuid:', profile.id,
-    '| couple_id:', profile.couple_id ?? 'none',
-    '| onboarding_done:', profile.onboarding_done
-  );
 
   // ── Step 4: Sync to Firestore (non-blocking, best-effort) ────────────────
   try {

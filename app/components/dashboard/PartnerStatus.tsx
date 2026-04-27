@@ -16,6 +16,7 @@ interface PartnerStatusProps {
     lastSeen?: string;
     taskCompleted: boolean;
     mood?: string;
+    moodEmoji?: string;
     photoUrl?: string;
   } | null;
   inviteCode?: string | null;
@@ -347,7 +348,7 @@ export default function PartnerStatus({
                   Sync Completed! 🎉
                   {partner.mood && (
                     <span className="ml-2 px-1.5 py-0.5 bg-green-500/20 rounded-full text-[10px] text-green-700 font-bold align-middle uppercase tracking-tighter">
-                      {partner.name} is {partner.mood}
+                      {partner.name} is {partner.moodEmoji ? `${partner.moodEmoji} ` : ''}{partner.mood}
                     </span>
                   )}
                 </p>
@@ -366,7 +367,7 @@ export default function PartnerStatus({
                   {partner.name} is waiting!
                   {partner.mood && (
                     <span className="ml-2 px-1.5 py-0.5 bg-green-500/20 rounded-full text-[10px] text-green-700 font-bold align-middle uppercase tracking-tighter">
-                      Feeling {partner.mood}
+                      Feeling {partner.moodEmoji ? `${partner.moodEmoji} ` : ''}{partner.mood}
                     </span>
                   )}
                 </p>
@@ -385,7 +386,7 @@ export default function PartnerStatus({
                   Ongoing Progress
                   {partner.mood && (
                     <span className="ml-2 px-1.5 py-0.5 bg-brand-rose/20 rounded-full text-[10px] text-brand-rose font-bold align-middle uppercase tracking-tighter">
-                      {partner.name}: {partner.mood}
+                      {partner.name}: {partner.moodEmoji ? `${partner.moodEmoji} ` : ''}{partner.mood}
                     </span>
                   )}
                 </p>

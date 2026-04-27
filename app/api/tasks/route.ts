@@ -1,6 +1,8 @@
 import { NextRequest } from 'next/server';
 import { withAuth, UserContext } from '@/lib/auth/with-auth';
 import { supabaseAdmin } from '@/lib/supabase/admin';
+import { adminDb } from '@/lib/firebase/admin-db';
+import { FieldValue } from 'firebase-admin/firestore';
 
 // GET /api/tasks — fetch today's task for the authenticated user's couple
 export const GET = withAuth(async (req: NextRequest, user: UserContext) => {
@@ -83,6 +85,7 @@ export const GET = withAuth(async (req: NextRequest, user: UserContext) => {
   }
 });
 
+
 // PATCH /api/tasks — mark today's task as complete
 export const PATCH = withAuth(async (req: NextRequest, user: UserContext) => {
   if (!user.coupleId) {
@@ -126,9 +129,23 @@ export const PATCH = withAuth(async (req: NextRequest, user: UserContext) => {
 
     if (updateError) throw updateError;
 
+    // ── SYNC TO FIRESTORE ───────────────────────────────────────────
+    // Update the couple's document in Firestore to trigger real-time onSnapshot for the partner
+    try {
+      await adminDb.doc(`couples/${user.coupleId}`).set({
+        taskCompleted: true,
+        updatedAt: FieldValue.serverTimestamp()
+      }, { merge: true });
+    } catch (fsError) {
+      console.error('[PATCH /api/tasks] Firestore sync failed:', fsError);
+      // Non-fatal, we still return the updated task from Supabase
+    }
+    // ────────────────────────────────────────────────────────────────
+
     return Response.json({ task: updated });
   } catch (error) {
     console.error('Complete task error:', error);
     return Response.json({ error: 'Failed to complete task' }, { status: 500 });
   }
 });
+

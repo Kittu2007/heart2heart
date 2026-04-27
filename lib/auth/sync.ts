@@ -18,7 +18,6 @@ export async function syncFirebaseUserToSupabase(
 ): Promise<{ profile: Profile | null; error: unknown; detail?: string }> {
   try {
     const dbId = toDbId(firebaseUid);
-    console.log('[SYNC] firebase_uid:', firebaseUid, '→ postgres_uuid:', dbId, '| name:', userData.name);
 
     // ── Build upsert payload ─────────────────────────────────────────────
     const payload: Record<string, unknown> = {
@@ -62,7 +61,6 @@ export async function syncFirebaseUserToSupabase(
       }
 
       // Row exists (was created before / by another path) — accept it
-      console.log('[SYNC] Fallback fetch succeeded. postgres_uuid:', fetched.id);
       profile = fetched as Profile;
     }
 
@@ -77,7 +75,6 @@ export async function syncFirebaseUserToSupabase(
       comfortLevel: userData.comfortLevel,
     });
 
-    console.log('[SYNC] ✓ Profile confirmed. postgres_uuid:', profile.id, '| couple_id:', profile.couple_id ?? 'none');
 
     // ── Eager couple assignment if user has no couple ────────────────────
     if (!profile.couple_id) {
@@ -113,7 +110,6 @@ async function _assignOrCreateCouple(
     .maybeSingle();
 
   if (existing) {
-    console.log('[SYNC] Re-linking existing couple:', existing.id);
     await supabaseAdmin.from('profiles').update({ couple_id: existing.id }).eq('id', dbId);
     await Promise.all([
       syncProfileToFirestore(firebaseUid, { coupleId: existing.id, inviteCode: existing.invite_code }),
@@ -144,7 +140,6 @@ async function _assignOrCreateCouple(
         status: 'pending',
       }),
     ]);
-    console.log('[SYNC] Created new couple:', newCouple.id, '| code:', inviteCode);
   }
 }
 

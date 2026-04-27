@@ -1,10 +1,12 @@
-import { NextRequest } from 'next/server';
+import { NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
 import { withAuth, UserContext } from '@/lib/auth/with-auth';
 import { supabaseAdmin } from '@/lib/supabase/admin';
 
 const MoodPostSchema = z.object({
-  mood: z.string().min(1).max(50).trim(),
+  mood: z.string().min(1).max(100).trim(),
+  emoji: z.string().max(20).nullable().optional(),
+  isCustom: z.boolean().default(false),
   shareWithPartner: z.boolean().default(true),
   note: z.string().max(500).nullable().optional(),
 });
@@ -12,25 +14,25 @@ const MoodPostSchema = z.object({
 // POST /api/mood — log a mood check-in
 export const POST = withAuth(async (req: NextRequest, user: UserContext) => {
   if (!user.coupleId) {
-    return Response.json({ error: 'No couple linked. Create or join a couple first.' }, { status: 404 });
+    return NextResponse.json({ error: 'No couple linked' }, { status: 404 });
   }
 
   let body: unknown;
   try {
     body = await req.json();
   } catch {
-    return Response.json({ error: 'Invalid JSON body' }, { status: 400 });
+    return NextResponse.json({ error: 'Invalid JSON body' }, { status: 400 });
   }
 
   const parsed = MoodPostSchema.safeParse(body);
   if (!parsed.success) {
-    return Response.json(
+    return NextResponse.json(
       { error: 'Invalid request body', details: parsed.error.flatten() },
       { status: 422 }
     );
   }
 
-  const { mood, shareWithPartner, note } = parsed.data;
+  const { mood, emoji, isCustom, shareWithPartner, note } = parsed.data;
 
   try {
     const query = supabaseAdmin.from('mood_checkins') as any;
@@ -39,18 +41,22 @@ export const POST = withAuth(async (req: NextRequest, user: UserContext) => {
         user_id: user.dbId,
         couple_id: user.coupleId,
         mood,
+        emoji: emoji || null,
+        is_custom: isCustom,
         share_with_partner: shareWithPartner,
         note: note ?? null,
       })
-      .select('id, mood, share_with_partner, note, created_at')
+      .select('id, mood, emoji, is_custom, share_with_partner, note, created_at')
       .single();
 
     if (error) throw error;
 
-    return Response.json({
+    return NextResponse.json({
       checkin: {
         id: checkin.id,
         mood: checkin.mood,
+        emoji: checkin.emoji,
+        isCustom: checkin.is_custom,
         shareWithPartner: checkin.share_with_partner,
         note: checkin.note,
         createdAt: checkin.created_at,
@@ -59,82 +65,87 @@ export const POST = withAuth(async (req: NextRequest, user: UserContext) => {
     }, { status: 201 });
   } catch (error) {
     console.error('Post mood error:', error);
-    return Response.json({ error: 'Failed to save mood' }, { status: 500 });
+    return NextResponse.json({ error: 'Failed to save mood' }, { status: 500 });
   }
 });
 
-// GET /api/mood — get own moods + partner moods (only if shared)
+// GET /api/mood — get own moods + partner moods
 export const GET = withAuth(async (req: NextRequest, user: UserContext) => {
   if (!user.coupleId) {
-    return Response.json({ error: 'No couple linked' }, { status: 404 });
+    return NextResponse.json({ error: 'No couple linked' }, { status: 404 });
   }
 
   const { searchParams } = new URL(req.url);
+  const latestOnly = searchParams.get('latest') === 'true';
   const limit = Math.min(parseInt(searchParams.get('limit') ?? '20'), 100);
-  const offset = Math.max(parseInt(searchParams.get('offset') ?? '0'), 0);
 
   try {
-    // Get couple to find partner ID
-    const couplesQuery = supabaseAdmin.from('couples') as any;
-    const { data: couple, error: coupleError } = await couplesQuery
+    if (latestOnly) {
+      // Return only the single latest mood for the user
+      const query = supabaseAdmin.from('mood_checkins') as any;
+      const { data: latest, error } = await query
+        .select('mood, emoji, note, created_at, share_with_partner')
+        .eq('user_id', user.dbId)
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+
+      if (error) throw error;
+      return NextResponse.json({ latest });
+    }
+
+    // Default: Get couple to find partner ID
+    const coupleQuery = supabaseAdmin.from('couples') as any;
+    const { data: couple, error: coupleError } = await coupleQuery
       .select('partner_a_id, partner_b_id')
       .eq('id', user.coupleId)
       .single();
 
     if (coupleError || !couple) {
-      return Response.json({ error: 'Couple not found' }, { status: 404 });
+      return NextResponse.json({ error: 'Couple not found' }, { status: 404 });
     }
 
-    const partnerId =
-      couple.partner_a_id === user.dbId ? couple.partner_b_id : couple.partner_a_id;
+    const partnerId = couple.partner_a_id === user.dbId ? couple.partner_b_id : couple.partner_a_id;
 
-    const moodQuery = supabaseAdmin.from('mood_checkins') as any;
-
-    // Own moods — all of them
-    const { data: ownMoods, error: ownError } = await moodQuery
-      .select('id, mood, share_with_partner, note, created_at')
+    // Fetch own moods
+    const ownMoodQuery = supabaseAdmin.from('mood_checkins') as any;
+    const { data: ownMoods, error: ownError } = await ownMoodQuery
+      .select('id, mood, emoji, is_custom, share_with_partner, note, created_at')
       .eq('user_id', user.dbId)
-      .eq('couple_id', user.coupleId)
       .order('created_at', { ascending: false })
-      .range(offset, offset + limit - 1);
+      .limit(limit);
 
     if (ownError) throw ownError;
 
-    // Partner moods — only those marked as shared
+    // Fetch partner moods (if shared)
     let partnerMoods: any[] = [];
     if (partnerId) {
-      const { data: pm, error: partnerError } = await moodQuery
-        .select('id, mood, note, created_at')
+      const partnerMoodQuery = supabaseAdmin.from('mood_checkins') as any;
+      const { data: pm, error: partnerError } = await partnerMoodQuery
+        .select('id, mood, emoji, note, created_at')
         .eq('user_id', partnerId)
-        .eq('couple_id', user.coupleId)
         .eq('share_with_partner', true)
         .order('created_at', { ascending: false })
-        .range(offset, offset + limit - 1);
+        .limit(1); // Usually we only care about their current mood on dashboard
 
       if (partnerError) throw partnerError;
       partnerMoods = pm || [];
     }
 
-    return Response.json({
+    return NextResponse.json({
       own: (ownMoods || []).map((m: any) => ({
-        id: m.id,
-        mood: m.mood,
+        ...m,
+        isCustom: m.is_custom,
         shareWithPartner: m.share_with_partner,
-        note: m.note,
-        createdAt: m.created_at,
-        isOwn: true,
+        isOwn: true
       })),
       partner: partnerMoods.map((m: any) => ({
-        id: m.id,
-        mood: m.mood,
-        note: m.note,
-        createdAt: m.created_at,
-        isOwn: false,
+        ...m,
+        isOwn: false
       })),
-      partnerId: partnerId ?? null,
     });
   } catch (error) {
     console.error('Get mood error:', error);
-    return Response.json({ error: 'Failed to fetch moods' }, { status: 500 });
+    return NextResponse.json({ error: 'Failed to fetch moods' }, { status: 500 });
   }
 });

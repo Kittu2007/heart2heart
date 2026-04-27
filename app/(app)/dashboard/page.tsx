@@ -2,12 +2,13 @@
 
 import { useEffect, useState, useCallback, useRef } from "react";
 import { useRouter } from "next/navigation";
-import { auth, db } from "@/utils/firebase/client";
+import { auth, db, rtdb } from "@/utils/firebase/client";
 import { useAuth } from "@/lib/contexts/auth-context";
 import {
   collection, addDoc, serverTimestamp, doc, updateDoc,
-  onSnapshot, query, where, limit,
+  onSnapshot, query, where, limit, setDoc
 } from "firebase/firestore";
+import { ref, onValue } from "firebase/database";
 import TopNavBar from "@/app/components/dashboard/TopNavBar";
 import ConnectionScoreCard from "@/app/components/dashboard/ConnectionScoreCard";
 import DailyTaskCard, { Task } from "@/app/components/dashboard/DailyTaskCard";
@@ -22,7 +23,7 @@ import { HeartHandshake } from "lucide-react";
 interface Feedback { rating: number; feelings: string[]; comment: string; }
 interface Partner {
   name: string; isOnline: boolean; lastSeen?: string;
-  taskCompleted: boolean; photoUrl?: string; mood?: string; _lastSeenDate?: Date;
+  taskCompleted: boolean; photoUrl?: string; mood?: string; moodEmoji?: string; _lastSeenDate?: Date;
 }
 
 async function authFetch(url: string, options: RequestInit = {}) {
@@ -125,6 +126,7 @@ export default function DashboardPage() {
           photoUrl: (partnerProfile!.avatar_url ?? prev?.photoUrl) || undefined,
           lastSeen: prev?.lastSeen,
           mood: prev?.mood,
+          moodEmoji: prev?.moodEmoji,
           _lastSeenDate: prev?._lastSeenDate,
         }));
         // Stop polling if active
@@ -138,15 +140,11 @@ export default function DashboardPage() {
     }
   }, []);
 
-  // ── Presence ─────────────────────────────────────────────────────────
+  // ── RTDB Presence for Current User ───────────────────────────────────
   useEffect(() => {
-    if (!currentUser) return;
-    const update = async () => {
-      try { await updateDoc(doc(db, "profiles", currentUser.uid), { lastSeen: serverTimestamp() }); } catch { /* non-fatal */ }
-    };
-    update();
-    const t = setInterval(update, 30000);
-    return () => clearInterval(t);
+    // This is handled in the root layout or AuthProvider normally,
+    // but we ensure it's here for the dashboard specifically if needed.
+    // (Actual setup is in lib/auth/presence.ts or similar)
   }, [currentUser]);
 
   // ── NEW: Firestore real-time listener for couple status ────────────────
@@ -160,13 +158,16 @@ export default function DashboardPage() {
           setCoupleStatus(data.status);
           coupleStatusRef.current = data.status;
           
-          // If it just became active, trigger a full re-fetch to get partner profile from Supabase
           if (data.status === 'active') {
             fetchCoupleFromSupabase(false);
           }
         }
+        
+        // Real-time task completion sync
+        if (data.taskCompleted === true) {
+          setPartner(prev => prev ? { ...prev, taskCompleted: true } : prev);
+        }
       } else {
-        // Couple record deleted in Firestore (means disconnected)
         if (coupleStatusRef.current !== null) {
           setCoupleStatus(null);
           setCoupleId(null);
@@ -174,7 +175,6 @@ export default function DashboardPage() {
           setPartnerDbId(null);
           setInviteCode(null);
           coupleStatusRef.current = null;
-          // Refresh to clean up Supabase state
           fetchCoupleFromSupabase(false);
         }
       }
@@ -187,13 +187,11 @@ export default function DashboardPage() {
   useEffect(() => {
     if (!currentUser || authLoading) return;
     
-    // Only show loading on initial mount or if we have no data
     if (!coupleId && !coupleStatus) {
       setIsPartnerLoading(true);
     }
 
     fetchCoupleFromSupabase(false).then(() => {
-      // Always ensure polling is running if not active
       if (pollRef.current) clearInterval(pollRef.current);
       
       if (coupleStatusRef.current !== "active") {
@@ -218,44 +216,59 @@ export default function DashboardPage() {
     }
   }, [coupleStatus]);
 
-  // ── Secondary: Firestore for presence, task, mood ────────────────────
+  // ── Secondary: RTDB Presence for Partner ─────────────────────────────
   useEffect(() => {
-    if (!currentUser || !partnerDbId) return;
+    if (!currentUser || !partnerDbId || !coupleId) return;
     const cleanups: (() => void)[] = [];
-    const calcOnline = (d?: Date | null) => !!d && new Date().getTime() - d.getTime() < 60000;
 
-    // Presence
+    // Find partner's Firebase UID from their profile doc
     const pQ = query(collection(db, "profiles"), where("dbId", "==", partnerDbId), limit(1));
-    cleanups.push(onSnapshot(pQ, snap => {
+    const profileUnsub = onSnapshot(pQ, snap => {
       if (!snap.empty) {
-        const d = snap.docs[0].data();
-        const ls = d.lastSeen?.toDate();
-        setPartner(prev => prev ? { ...prev, isOnline: calcOnline(ls), lastSeen: ls?.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }), _lastSeenDate: ls, photoUrl: d.photoURL || d.photoUrl || prev.photoUrl } : prev);
+        const partnerUid = snap.docs[0].id;
+        const presenceRef = ref(rtdb, 'presence/' + partnerUid);
+        
+        const rtdbUnsub = onValue(presenceRef, (presenceSnap) => {
+          const status = presenceSnap.val();
+          setPartner(prev => prev ? { 
+            ...prev, 
+            isOnline: status === 'online',
+            lastSeen: status === 'online' ? 'Online' : (status === 'offline' ? 'Offline' : prev.lastSeen)
+          } : prev);
+        });
+        cleanups.push(() => rtdbUnsub());
       }
-    }));
-
-    // Task completion
-    cleanups.push(onSnapshot(query(collection(db, "completed_tasks"), where("userId", "==", partnerDbId)), snap => {
-      const today = new Date(); today.setHours(0, 0, 0, 0);
-      const hasToday = snap.docs.some(d => { const c = d.data().completedAt?.toDate(); return c && c >= today; });
-      setPartner(prev => prev ? { ...prev, taskCompleted: hasToday } : null);
-    }));
-
-    // Mood
-    cleanups.push(onSnapshot(query(collection(db, "mood_checkins"), where("userId", "==", partnerDbId)), snap => {
-      let latest: any = null; let lt = 0;
-      snap.docs.forEach(d => { const x = d.data(); if (x.shareWithPartner) { const t = x.timestamp?.toDate()?.getTime() || 0; if (t > lt) { lt = t; latest = x; } } });
-      if (latest) setPartner(prev => prev ? { ...prev, mood: latest.mood } : null);
-    }));
-
-    // Online timer
-    const ot = setInterval(() => {
-      setPartner(prev => { if (!prev?._lastSeenDate) return prev; const s = calcOnline(prev._lastSeenDate); return s === prev.isOnline ? prev : { ...prev, isOnline: s }; });
-    }, 30000);
-    cleanups.push(() => clearInterval(ot));
+    });
+    cleanups.push(profileUnsub);
 
     return () => cleanups.forEach(fn => fn());
-  }, [currentUser, partnerDbId]);
+  }, [currentUser, partnerDbId, coupleId]);
+
+  // ── Fetch Partner Mood (Supabase) ────────────────────────────────────
+  useEffect(() => {
+    if (!currentUser || !partnerDbId || coupleStatus !== "active") return;
+
+    const fetchPartnerMood = async () => {
+      try {
+        const res = await authFetch("/api/mood");
+        if (res.partner && res.partner.length > 0) {
+          const latest = res.partner[0];
+          setPartner(prev => prev ? { 
+            ...prev, 
+            mood: latest.mood, 
+            moodEmoji: latest.emoji 
+          } : null);
+        }
+      } catch (err) {
+        console.error("[Dashboard] Partner mood fetch error:", err);
+      }
+    };
+
+    fetchPartnerMood();
+    const t = setInterval(fetchPartnerMood, 30000);
+    return () => clearInterval(t);
+  }, [currentUser, partnerDbId, coupleStatus]);
+
 
   // ── Connection score (Firestore) ─────────────────────────────────────
   useEffect(() => {
@@ -271,59 +284,59 @@ export default function DashboardPage() {
 
   // ── Handlers ─────────────────────────────────────────────────────────
   const handleTaskComplete = useCallback(async () => {
-    if (!currentUser) return;
+    if (!currentUser || !coupleId) return;
     setIsActionLoading(true);
+    
     try {
-      await Promise.race([
-        addDoc(collection(db, "completed_tasks"), { 
-          userId: currentUser.uid, 
-          task: dailyTask, 
-          reflection, 
-          completedAt: serverTimestamp() 
-        }), 
-        new Promise((_, r) => setTimeout(() => r(new Error("Timeout")), 10000))
-      ]);
+      // 1. Update Supabase via API
+      const token = await currentUser.getIdToken();
+      const res = await fetch("/api/tasks", {
+        method: "PATCH",
+        headers: { 
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${token}` 
+        },
+        body: JSON.stringify({ taskId: (dailyTask as any).id })
+      });
+
+      if (!res.ok) throw new Error("Failed to update Supabase");
+
+      // 2. Firestore updates for real-time sync
+      await setDoc(doc(db, "couples", coupleId), { 
+        taskCompleted: true, 
+        updatedAt: serverTimestamp() 
+      }, { merge: true });
+
+      await addDoc(collection(db, "completed_tasks"), { 
+        userId: currentUser.uid, 
+        task: dailyTask, 
+        reflection, 
+        completedAt: serverTimestamp() 
+      });
+
       setHasCompletedTask(true); 
       setIsFeedbackModalOpen(true); 
       playSound(SoundType.SUCCESS);
-    } catch (error) {
-      console.error("Task completion failed:", error);
+    } catch (err) {
+      console.error("[Dashboard] Task completion failed:", err);
     } finally {
       setIsActionLoading(false);
     }
-  }, [currentUser, dailyTask, reflection]);
+  }, [currentUser, dailyTask, reflection, coupleId]);
 
   const handleFeedbackSubmit = useCallback(async (feedback: Feedback) => {
     if (!currentUser || !coupleId || !dbId) return;
     try {
-      await Promise.race([
-        addDoc(collection(db, "feedback"), { 
-          userId: dbId, 
-          taskId: dailyTask.title, 
-          rating: feedback.rating, 
-          feelings: feedback.feelings, 
-          comment: feedback.comment, 
-          coupleId, 
-          submittedAt: serverTimestamp() 
-        }), 
-        new Promise((_, r) => setTimeout(() => r(new Error("Timeout")), 10000))
-      ]);
-      
-      // Update mood if feelings were selected
-      if (feedback.feelings.length > 0) {
-        const profileRef = doc(db, "profiles", currentUser.uid);
-        await updateDoc(profileRef, {
-          mood: feedback.feelings[0],
-          lastMoodUpdate: serverTimestamp()
-        });
-      }
-
-      setDailyTask({ 
-        title: "Meaningful Conversation", 
-        description: "Ask your partner what they appreciated most about you today.", 
-        category: "connection", 
-        intensity: 2 
+      await addDoc(collection(db, "feedback"), { 
+        userId: dbId, 
+        taskId: dailyTask.title, 
+        rating: feedback.rating, 
+        feelings: feedback.feelings, 
+        comment: feedback.comment, 
+        coupleId, 
+        submittedAt: serverTimestamp() 
       });
+      
       setHasCompletedTask(false); 
       setIsFeedbackModalOpen(false); 
       setReflection("");
@@ -334,37 +347,61 @@ export default function DashboardPage() {
     }
   }, [currentUser, dailyTask, coupleId, dbId]);
 
-  const handleMoodChange = useCallback(async (mood: string) => {
-    setSelectedMood(mood); playSound(SoundType.POP);
+  const [selectedEmoji, setSelectedEmoji] = useState("😊");
+
+  // ── Fetch current mood ────────────────────────────────────────────────
+  useEffect(() => {
+    if (coupleStatus === "active") {
+      authFetch("/api/mood?latest=true")
+        .then(res => {
+          if (res.latest) {
+            setSelectedMood(res.latest.mood);
+            setSelectedEmoji(res.latest.emoji || "😊");
+            setShareWithPartner(res.latest.share_with_partner);
+          }
+        })
+        .catch(err => console.error("[Dashboard] Failed to fetch latest mood:", err));
+    }
+  }, [coupleStatus]);
+
+  // ── Handlers ─────────────────────────────────────────────────────────
+  const handleMoodChange = useCallback(async (mood: string, emoji?: string, isCustom?: boolean) => {
+    setSelectedMood(mood);
+    if (emoji) setSelectedEmoji(emoji);
+    playSound(SoundType.POP);
+    
     if (!currentUser) return;
-    try { 
-      await Promise.race([
-        addDoc(collection(db, "mood_checkins"), { 
-          userId: currentUser.uid, 
-          mood, 
-          shareWithPartner, 
-          timestamp: serverTimestamp() 
-        }), 
-        new Promise((_, r) => setTimeout(() => r(new Error("Timeout")), 5000))
-      ]); 
-    } catch { /* non-fatal */ }
-  }, [currentUser, shareWithPartner]);
+    try {
+      await authFetch("/api/mood", {
+        method: "POST",
+        body: JSON.stringify({
+          mood,
+          emoji: emoji || selectedEmoji,
+          isCustom: !!isCustom,
+          shareWithPartner
+        })
+      });
+    } catch (err) {
+      console.error("[Dashboard] Mood update failed:", err);
+    }
+  }, [currentUser, shareWithPartner, selectedEmoji]);
 
   const handleShareToggle = useCallback(async (shared: boolean) => {
     setShareWithPartner(shared);
     if (!currentUser) return;
-    try { 
-      await Promise.race([
-        addDoc(collection(db, "mood_checkins"), { 
-          userId: currentUser.uid, 
-          mood: selectedMood, 
-          shareWithPartner: shared, 
-          timestamp: serverTimestamp() 
-        }), 
-        new Promise((_, r) => setTimeout(() => r(new Error("Timeout")), 5000))
-      ]); 
-    } catch { /* non-fatal */ }
-  }, [currentUser, selectedMood]);
+    try {
+      await authFetch("/api/mood", {
+        method: "POST",
+        body: JSON.stringify({
+          mood: selectedMood,
+          emoji: selectedEmoji,
+          shareWithPartner: shared
+        })
+      });
+    } catch (err) {
+      console.error("[Dashboard] Share toggle update failed:", err);
+    }
+  }, [currentUser, selectedMood, selectedEmoji]);
 
   const handleUpdateTask = useCallback((t: Task) => setDailyTask(t), []);
 

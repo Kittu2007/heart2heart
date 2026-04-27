@@ -23,7 +23,6 @@ export async function syncProfileToFirestore(uid: string, data: {
     if (data.comfortLevel !== undefined) update.comfortLevel = data.comfortLevel;
     
     await profileRef.set(update, { merge: true });
-    console.log(`[FirestoreSync] Profile ${uid} updated with dbId: ${data.dbId}`);
   } catch (err) {
     console.error(`[FirestoreSync] Failed to update profile ${uid}:`, err);
   }
@@ -41,7 +40,6 @@ export async function syncCoupleToFirestore(coupleId: string, data: { inviteCode
     if (data.partnerBUid !== undefined) update.partnerBUid = data.partnerBUid;
     
     await coupleRef.set(update, { merge: true });
-    console.log(`[FirestoreSync] Couple ${coupleId} updated`);
   } catch (err) {
     console.error(`[FirestoreSync] Failed to update couple ${coupleId}:`, err);
   }

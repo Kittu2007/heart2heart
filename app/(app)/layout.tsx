@@ -3,6 +3,8 @@
 import { useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/lib/contexts/auth-context";
+import { rtdb } from "@/utils/firebase/client";
+import { ref, onDisconnect, set } from "firebase/database";
 
 export default function AppLayout({ children }: { children: React.ReactNode }) {
   const router = useRouter();
@@ -12,7 +14,12 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
     if (!loading && !user) {
       router.push("/login");
     } else if (user) {
-      // Background sync to ensure Firestore profile and invite code are ready
+      // 1. Presence setup
+      const presenceRef = ref(rtdb, 'presence/' + user.uid);
+      onDisconnect(presenceRef).set('offline');
+      set(presenceRef, 'online');
+
+      // 2. Background sync to ensure Firestore profile and invite code are ready
       user.getIdToken().then(token => {
         fetch("/api/auth/sync", {
           method: "POST",
@@ -41,3 +48,4 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
 
   return <>{children}</>;
 }
+

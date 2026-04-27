@@ -8,6 +8,8 @@ CREATE TABLE IF NOT EXISTS profiles (
   onboarding_done BOOLEAN DEFAULT FALSE,
   comfort_level SMALLINT DEFAULT 3 CHECK (comfort_level BETWEEN 1 AND 5),
   is_admin BOOLEAN DEFAULT FALSE,
+  notification_enabled BOOLEAN DEFAULT TRUE,
+  sound_enabled BOOLEAN DEFAULT TRUE,
   created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
@@ -70,6 +72,8 @@ CREATE TABLE IF NOT EXISTS mood_checkins (
   user_id UUID NOT NULL REFERENCES profiles(id) ON DELETE CASCADE,
   couple_id UUID NOT NULL REFERENCES couples(id) ON DELETE CASCADE,
   mood TEXT NOT NULL,
+  emoji TEXT,
+  is_custom BOOLEAN DEFAULT FALSE,
   share_with_partner BOOLEAN DEFAULT FALSE,
   note TEXT,
   created_at TIMESTAMPTZ DEFAULT NOW()
@@ -89,176 +93,63 @@ CREATE TABLE IF NOT EXISTS ai_logs (
   created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
-CREATE TABLE IF NOT EXISTS calendar_events (
+CREATE TABLE IF NOT EXISTS memories (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-  user_id UUID NOT NULL REFERENCES profiles(id) ON DELETE CASCADE,
-  couple_id UUID REFERENCES couples(id) ON DELETE CASCADE,
-  title TEXT NOT NULL,
-  type TEXT NOT NULL CHECK (type IN ('date', 'countdown', 'message')),
-  date DATE NOT NULL,
+  couple_id UUID NOT NULL REFERENCES couples(id) ON DELETE CASCADE,
+  uploaded_by UUID NOT NULL REFERENCES profiles(id) ON DELETE CASCADE,
+  title TEXT,
   description TEXT,
+  caption TEXT,
+  image_url TEXT NOT NULL,
+  memory_date TIMESTAMPTZ DEFAULT NOW(),
+  mood TEXT,
   created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
-CREATE INDEX IF NOT EXISTS idx_profiles_couple_id ON profiles(couple_id);
-CREATE INDEX IF NOT EXISTS idx_profiles_is_admin ON profiles(is_admin) WHERE is_admin = TRUE;
-CREATE INDEX IF NOT EXISTS idx_couples_invite_code ON couples(invite_code);
-CREATE INDEX IF NOT EXISTS idx_couples_status ON couples(status);
-CREATE INDEX IF NOT EXISTS idx_daily_tasks_couple_id ON daily_tasks(couple_id);
-CREATE INDEX IF NOT EXISTS idx_daily_tasks_couple_date ON daily_tasks(couple_id, generated_date);
-CREATE INDEX IF NOT EXISTS idx_feedback_couple_id ON feedback(couple_id);
-CREATE INDEX IF NOT EXISTS idx_mood_checkins_user_id ON mood_checkins(user_id);
-CREATE INDEX IF NOT EXISTS idx_ai_logs_timestamp ON ai_logs(timestamp);
-CREATE INDEX IF NOT EXISTS idx_ai_logs_status ON ai_logs(status);
-CREATE INDEX IF NOT EXISTS idx_calendar_events_user_id ON calendar_events(user_id);
-CREATE INDEX IF NOT EXISTS idx_calendar_events_couple_date ON calendar_events(couple_id, date);
+CREATE TABLE IF NOT EXISTS scheduled_events (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  couple_id UUID NOT NULL REFERENCES couples(id) ON DELETE CASCADE,
+  created_by UUID NOT NULL REFERENCES profiles(id),
+  title TEXT NOT NULL,
+  message TEXT,
+  scheduled_for TIMESTAMPTZ NOT NULL,
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
 
+CREATE TABLE IF NOT EXISTS locked_messages (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  couple_id UUID NOT NULL REFERENCES couples(id) ON DELETE CASCADE,
+  sender_id UUID NOT NULL REFERENCES profiles(id) ON DELETE CASCADE,
+  content TEXT NOT NULL,
+  unlock_at TIMESTAMPTZ NOT NULL,
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- Indices
+CREATE INDEX IF NOT EXISTS idx_profiles_couple_id ON profiles(couple_id);
+CREATE INDEX IF NOT EXISTS idx_couples_invite_code ON couples(invite_code);
+CREATE INDEX IF NOT EXISTS idx_daily_tasks_couple_date ON daily_tasks(couple_id, generated_date);
+CREATE INDEX IF NOT EXISTS idx_memories_couple_id ON memories(couple_id);
+CREATE INDEX IF NOT EXISTS idx_memories_memory_date ON memories(memory_date DESC);
+CREATE INDEX IF NOT EXISTS idx_scheduled_events_couple_id ON scheduled_events(couple_id);
+CREATE INDEX IF NOT EXISTS idx_scheduled_events_scheduled_for ON scheduled_events(scheduled_for);
+
+-- RLS
 ALTER TABLE profiles ENABLE ROW LEVEL SECURITY;
 ALTER TABLE couples ENABLE ROW LEVEL SECURITY;
 ALTER TABLE onboarding_responses ENABLE ROW LEVEL SECURITY;
 ALTER TABLE daily_tasks ENABLE ROW LEVEL SECURITY;
 ALTER TABLE feedback ENABLE ROW LEVEL SECURITY;
 ALTER TABLE mood_checkins ENABLE ROW LEVEL SECURITY;
-ALTER TABLE ai_logs ENABLE ROW LEVEL SECURITY;
-ALTER TABLE calendar_events ENABLE ROW LEVEL SECURITY;
-
-CREATE POLICY "Users can view own profile" ON profiles FOR SELECT USING (auth.uid() = id);
-CREATE POLICY "Users can view partner profile" ON profiles FOR SELECT USING (couple_id IS NOT NULL AND couple_id IN (SELECT couple_id FROM profiles WHERE id = auth.uid()));
-CREATE POLICY "Users can view profiles by invite code lookup" ON profiles FOR SELECT USING (
-  couple_id IN (SELECT id FROM couples WHERE status = 'pending' AND partner_a_id != auth.uid())
-);
-CREATE POLICY "Users can update own profile" ON profiles FOR UPDATE USING (auth.uid() = id) WITH CHECK (auth.uid() = id);
-CREATE POLICY "Users can insert own profile" ON profiles FOR INSERT WITH CHECK (auth.uid() = id);
-
-CREATE POLICY "Users can view own couple" ON couples FOR SELECT USING (partner_a_id = auth.uid() OR partner_b_id = auth.uid());
-CREATE POLICY "Users can create couples" ON couples FOR INSERT WITH CHECK (partner_a_id = auth.uid());
-CREATE POLICY "Users can update own couple" ON couples FOR UPDATE USING (partner_a_id = auth.uid() OR partner_b_id = auth.uid());
-
-CREATE POLICY "Users can view own onboarding" ON onboarding_responses FOR SELECT USING (user_id = auth.uid());
-CREATE POLICY "Users can insert own onboarding" ON onboarding_responses FOR INSERT WITH CHECK (user_id = auth.uid());
-CREATE POLICY "Users can update own onboarding" ON onboarding_responses FOR UPDATE USING (user_id = auth.uid()) WITH CHECK (user_id = auth.uid());
-
-CREATE POLICY "Users can view couple tasks" ON daily_tasks FOR SELECT USING (couple_id IN (SELECT couple_id FROM profiles WHERE id = auth.uid()));
-CREATE POLICY "Users can update couple tasks" ON daily_tasks FOR UPDATE USING (couple_id IN (SELECT couple_id FROM profiles WHERE id = auth.uid()));
-
-CREATE POLICY "Users can view own feedback" ON feedback FOR SELECT USING (user_id = auth.uid());
-CREATE POLICY "Users can insert own feedback" ON feedback FOR INSERT WITH CHECK (user_id = auth.uid());
-
-CREATE POLICY "Users can view own mood" ON mood_checkins FOR SELECT USING (user_id = auth.uid());
-CREATE POLICY "Partner can view shared mood" ON mood_checkins FOR SELECT USING (share_with_partner = TRUE AND couple_id IN (SELECT couple_id FROM profiles WHERE id = auth.uid()) AND user_id != auth.uid());
-CREATE POLICY "Users can insert own mood" ON mood_checkins FOR INSERT WITH CHECK (user_id = auth.uid());
-
-CREATE POLICY "Users can view own calendar events" ON calendar_events FOR SELECT USING (user_id = auth.uid());
-CREATE POLICY "Users can insert own calendar events" ON calendar_events FOR INSERT WITH CHECK (user_id = auth.uid());
-CREATE POLICY "Users can delete own calendar events" ON calendar_events FOR DELETE USING (user_id = auth.uid());
-
-CREATE OR REPLACE FUNCTION generate_invite_code()
-RETURNS TEXT AS $$
-DECLARE
-  chars TEXT := 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
-  result TEXT := '';
-  i INTEGER;
-BEGIN
-  FOR i IN 1..6 LOOP
-    result := result || substr(chars, floor(random() * length(chars) + 1)::int, 1);
-  END LOOP;
-  RETURN result;
-END;
-$$ LANGUAGE plpgsql;
-
-CREATE TABLE IF NOT EXISTS couple_dates (
-  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-  couple_id UUID NOT NULL REFERENCES couples(id) ON DELETE CASCADE,
-  created_by UUID NOT NULL REFERENCES profiles(id),
-  title TEXT NOT NULL,
-  type TEXT NOT NULL,
-  date DATE NOT NULL,
-  note TEXT,
-  created_at TIMESTAMPTZ DEFAULT NOW()
-);
-
-CREATE TABLE IF NOT EXISTS events (
-  id          UUID        PRIMARY KEY DEFAULT uuid_generate_v4(),
-  couple_id   UUID        NOT NULL REFERENCES couples(id)   ON DELETE CASCADE,
-  created_by  UUID        NOT NULL REFERENCES profiles(id),
-  title       TEXT        NOT NULL,
-  description TEXT,
-  event_type  TEXT        CHECK (event_type IN ('date','countdown','message')),
-  event_date  TIMESTAMPTZ NOT NULL,
-  created_at  TIMESTAMPTZ DEFAULT NOW()
-);
-
-CREATE INDEX IF NOT EXISTS idx_couple_dates_couple_id ON couple_dates(couple_id);
-CREATE INDEX IF NOT EXISTS idx_events_couple_id  ON events(couple_id);
-CREATE INDEX IF NOT EXISTS idx_events_event_date ON events(event_date);
-
-ALTER TABLE couple_dates ENABLE ROW LEVEL SECURITY;
-ALTER TABLE events ENABLE ROW LEVEL SECURITY;
-
-CREATE POLICY "Users can view couple dates" ON couple_dates FOR SELECT USING (couple_id IN (SELECT couple_id FROM profiles WHERE id = auth.uid()));
-CREATE POLICY "Users can insert couple dates" ON couple_dates FOR INSERT WITH CHECK (couple_id IN (SELECT couple_id FROM profiles WHERE id = auth.uid()) AND created_by = auth.uid());
-CREATE POLICY "Users can delete couple dates" ON couple_dates FOR DELETE USING (couple_id IN (SELECT couple_id FROM profiles WHERE id = auth.uid()));
-
-CREATE POLICY "Couple can view events" ON events FOR SELECT USING (couple_id IN (SELECT couple_id FROM profiles WHERE id = auth.uid()));
-CREATE POLICY "Couple can insert events" ON events FOR INSERT WITH CHECK (created_by = auth.uid());
-CREATE POLICY "Creator can delete events" ON events FOR DELETE USING (created_by = auth.uid());
-
--- Locked Messages
-CREATE TABLE IF NOT EXISTS locked_messages (
-  id         UUID        PRIMARY KEY DEFAULT uuid_generate_v4(),
-  couple_id  UUID        NOT NULL REFERENCES couples(id) ON DELETE CASCADE,
-  sender_id  UUID        NOT NULL REFERENCES profiles(id) ON DELETE CASCADE,
-  content    TEXT        NOT NULL,
-  unlock_at  TIMESTAMPTZ NOT NULL,
-  created_at TIMESTAMPTZ DEFAULT NOW()
-);
-
+ALTER TABLE memories ENABLE ROW LEVEL SECURITY;
+ALTER TABLE scheduled_events ENABLE ROW LEVEL SECURITY;
 ALTER TABLE locked_messages ENABLE ROW LEVEL SECURITY;
 
-CREATE POLICY "Couple can view locked messages"
-ON locked_messages FOR SELECT
-USING (couple_id IN (
-  SELECT couple_id FROM profiles WHERE id = auth.uid()
-));
-
-CREATE POLICY "Sender can insert locked message"
-ON locked_messages FOR INSERT
-WITH CHECK (sender_id = auth.uid());
-
-CREATE POLICY "Sender can delete own locked message"
-ON locked_messages FOR DELETE
-USING (sender_id = auth.uid());
-
-CREATE INDEX IF NOT EXISTS idx_locked_messages_couple_id ON locked_messages(couple_id);
-CREATE INDEX IF NOT EXISTS idx_locked_messages_unlock_at  ON locked_messages(unlock_at);
-
--- Memories
-CREATE TABLE IF NOT EXISTS memories (
-  id          UUID        PRIMARY KEY DEFAULT uuid_generate_v4(),
-  couple_id   UUID        NOT NULL REFERENCES couples(id)   ON DELETE CASCADE,
-  uploaded_by UUID        NOT NULL REFERENCES profiles(id)  ON DELETE CASCADE,
-  title       TEXT        NOT NULL,
-  description TEXT,
-  memory_date TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-  image_url   TEXT,
-  mood        TEXT,
-  created_at  TIMESTAMPTZ DEFAULT NOW()
-);
-
-ALTER TABLE memories ENABLE ROW LEVEL SECURITY;
-
-CREATE POLICY "Couple can view memories"
-ON memories FOR SELECT
-USING (couple_id IN (SELECT couple_id FROM profiles WHERE id = auth.uid()));
-
-CREATE POLICY "User can insert own memory"
-ON memories FOR INSERT
-WITH CHECK (uploaded_by = auth.uid());
-
-CREATE POLICY "Uploader can delete own memory"
-ON memories FOR DELETE
-USING (uploaded_by = auth.uid());
-
-CREATE INDEX IF NOT EXISTS idx_memories_couple_id  ON memories(couple_id);
-CREATE INDEX IF NOT EXISTS idx_memories_memory_date ON memories(memory_date DESC);
-
+-- Policies (Simplified)
+CREATE POLICY "Profiles access" ON profiles FOR ALL USING (id = auth.uid() OR couple_id IN (SELECT couple_id FROM profiles WHERE id = auth.uid()));
+CREATE POLICY "Couples access" ON couples FOR ALL USING (partner_a_id = auth.uid() OR partner_b_id = auth.uid());
+CREATE POLICY "Memories access" ON memories FOR ALL USING (couple_id IN (SELECT couple_id FROM profiles WHERE id = auth.uid()));
+CREATE POLICY "Events access" ON scheduled_events FOR ALL USING (couple_id IN (SELECT couple_id FROM profiles WHERE id = auth.uid()));
+CREATE POLICY "Mood access" ON mood_checkins FOR ALL USING (user_id = auth.uid() OR (share_with_partner = TRUE AND couple_id IN (SELECT couple_id FROM profiles WHERE id = auth.uid())));
+CREATE POLICY "Feedback access" ON feedback FOR ALL USING (user_id = auth.uid() OR couple_id IN (SELECT couple_id FROM profiles WHERE id = auth.uid()));
+CREATE POLICY "Locked messages access" ON locked_messages FOR ALL USING (couple_id IN (SELECT couple_id FROM profiles WHERE id = auth.uid()));

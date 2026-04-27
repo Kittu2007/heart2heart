@@ -21,9 +21,23 @@ interface ProfileData {
   comfort_level: number | null;
   notification_enabled: boolean;
   sound_enabled: boolean;
-  photo_url: string | null;
+  avatar_url: string | null;
   couple_id: string | null;
   invite_code?: string | null;
+}
+
+interface SettingItem {
+  label: string;
+  value: string | boolean;
+  toggle?: boolean;
+  component?: React.ReactNode;
+  action?: () => void;
+}
+
+interface SettingSection {
+  title: string;
+  icon: React.ReactNode;
+  items: SettingItem[];
 }
 
 const LOVE_LANGUAGES = [
@@ -44,7 +58,7 @@ export default function SettingsPage() {
   const [partnerName, setPartnerName] = useState<string | null>(null);
 
   // Form state
-  const [displayName, setDisplayName] = useState("");
+  const [name, setName] = useState("");
   const [loveLanguage, setLoveLanguage] = useState("");
   const [comfortLevel, setComfortLevel] = useState(3);
   const [notificationsEnabled, setNotificationsEnabled] = useState(true);
@@ -75,7 +89,7 @@ export default function SettingsPage() {
 
       const data: ProfileData = await res.json();
       setProfile(data);
-      setDisplayName(data.name ?? "");
+      setName(data.name ?? "");
       setLoveLanguage(data.love_language ?? "");
       setComfortLevel(data.comfort_level ?? 3);
       setNotificationsEnabled(data.notification_enabled ?? true);
@@ -114,7 +128,7 @@ export default function SettingsPage() {
 
   // ── Save profile ───────────────────────────────────
 
-  const handleSave = async () => {
+  const handleSave = async (updatedFields?: Partial<ProfileData>) => {
     setSaving(true);
     setError(null);
     setSuccessMessage(null);
@@ -123,11 +137,11 @@ export default function SettingsPage() {
       const res = await authFetch("/api/profile", {
         method: "PATCH",
         body: JSON.stringify({
-          name: displayName.trim() || null,
-          love_language: loveLanguage || null,
-          comfort_level: comfortLevel,
-          notification_enabled: notificationsEnabled,
-          sound_enabled: soundEnabled,
+          name: updatedFields?.name !== undefined ? updatedFields.name : (name.trim() || null),
+          love_language: updatedFields?.love_language !== undefined ? updatedFields.love_language : (loveLanguage || null),
+          comfort_level: updatedFields?.comfort_level !== undefined ? updatedFields.comfort_level : comfortLevel,
+          notification_enabled: updatedFields?.notification_enabled !== undefined ? updatedFields.notification_enabled : notificationsEnabled,
+          sound_enabled: updatedFields?.sound_enabled !== undefined ? updatedFields.sound_enabled : soundEnabled,
         }),
       });
 
@@ -140,7 +154,6 @@ export default function SettingsPage() {
       playSound(SoundType.SUCCESS);
       setTimeout(() => setSuccessMessage(null), 3000);
       
-      // Update local profile state
       const updatedData = await res.json();
       setProfile(updatedData);
     } catch (err: unknown) {
@@ -157,16 +170,57 @@ export default function SettingsPage() {
     else setSoundEnabled(value);
     
     playSound(SoundType.CLICK);
-    
+    handleSave({ [key === 'notification' ? 'notification_enabled' : 'sound_enabled']: value });
+  };
+
+  // ── Profile Picture Upload ─────────────────────────
+
+  const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    if (!file.type.startsWith("image/")) {
+      setError("Please upload an image file.");
+      return;
+    }
+    if (file.size > 5 * 1024 * 1024) {
+      setError("Image size should be less than 5MB.");
+      return;
+    }
+
+    setSaving(true);
+    setError(null);
+    setSuccessMessage(null);
+
     try {
-      await authFetch("/api/profile", {
-        method: "PATCH",
-        body: JSON.stringify({
-          [`${key}_enabled`]: value
-        }),
+      const formData = new FormData();
+      formData.append("file", file);
+
+      const token = await auth.currentUser?.getIdToken();
+      const res = await fetch("/api/upload", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+        body: formData,
       });
-    } catch (err) {
-      console.error(`Failed to update ${key} preference:`, err);
+
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        throw new Error(body?.error ?? "Failed to upload image");
+      }
+
+      const { url } = await res.json();
+      setProfile(prev => prev ? { ...prev, avatar_url: url } : null);
+      setSuccessMessage("Profile picture updated ✓");
+      playSound(SoundType.SUCCESS);
+      setTimeout(() => setSuccessMessage(null), 3000);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : "Failed to upload image";
+      console.error("[SettingsPage] handleImageUpload error:", err);
+      setError(msg);
+    } finally {
+      setSaving(false);
     }
   };
 
@@ -225,28 +279,19 @@ export default function SettingsPage() {
     );
   }
 
-  interface SettingsItem {
-    label: string;
-    value: string | boolean;
-    toggle?: boolean;
-    action?: () => void | Promise<void>;
-    component?: React.ReactNode;
-  }
-
-  const sections: { title: string; icon: React.ReactNode; items: SettingsItem[] }[] = [
+  const sections: SettingSection[] = [
     {
       title: "Account",
       icon: <User size={20} className="text-blue-500" />,
       items: [
         { 
           label: "Display Name", 
-          value: displayName || "Set your name",
+          value: name || "Set your name",
           action: () => {
-            const name = prompt("Update Display Name:", displayName);
-            if (name !== null) {
-              setDisplayName(name.trim());
-              // Auto-save name
-              setTimeout(() => handleSave(), 100);
+            const newVal = prompt("Update Display Name:", name);
+            if (newVal !== null) {
+              setName(newVal.trim());
+              handleSave({ name: newVal.trim() });
             }
           }
         },
@@ -278,7 +323,7 @@ export default function SettingsPage() {
             const val = prompt("Enter love language (quality_time, physical_touch, words_of_affirmation, acts_of_service, receiving_gifts):", loveLanguage);
             if (val && LOVE_LANGUAGES.some(l => l.value === val)) {
               setLoveLanguage(val);
-              setTimeout(() => handleSave(), 100);
+              handleSave({ love_language: val });
             }
           }
         },
@@ -291,7 +336,7 @@ export default function SettingsPage() {
               const num = parseInt(val);
               if (num >= 1 && num <= 5) {
                 setComfortLevel(num);
-                setTimeout(() => handleSave(), 100);
+                handleSave({ comfort_level: num });
               }
             }
           }
@@ -328,15 +373,30 @@ export default function SettingsPage() {
       <TopNavBar />
       
       <main className="mx-auto w-full max-w-[800px] px-6 py-10">
-        <header className="mb-10 flex items-end justify-between">
-          <div>
-            <div className="flex items-center gap-3 mb-2">
-              <div className="p-2 bg-white rounded-xl shadow-sm border border-black/5">
-                <Settings className="text-[#1a1c1b]" size={24} />
+        <header className="mb-10 flex items-center justify-between">
+          <div className="flex items-center gap-6">
+            <div className="relative group">
+              <div className="w-24 h-24 rounded-[32px] bg-brand-rose/10 border-2 border-brand-rose/20 overflow-hidden flex items-center justify-center shadow-sm">
+                {profile?.avatar_url ? (
+                  <img src={profile.avatar_url} alt="Profile" className="w-full h-full object-cover" />
+                ) : (
+                  <User size={40} className="text-brand-rose/40" />
+                )}
               </div>
-              <h1 className="text-3xl font-bold text-[#1a1c1b]">Settings</h1>
+              <label className="absolute inset-0 flex items-center justify-center bg-black/40 text-white opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer rounded-[32px]">
+                <span className="text-[10px] font-bold uppercase tracking-wider">Update</span>
+                <input type="file" className="hidden" accept="image/*" onChange={handleImageUpload} disabled={saving} />
+              </label>
             </div>
-            <p className="text-[#78716c]">Refine your experience and bond.</p>
+            <div>
+              <div className="flex items-center gap-3 mb-1">
+                <div className="p-2 bg-white rounded-xl shadow-sm border border-black/5">
+                  <Settings className="text-[#1a1c1b]" size={20} />
+                </div>
+                <h1 className="text-3xl font-bold text-[#1a1c1b]">Settings</h1>
+              </div>
+              <p className="text-[#78716c]">Refine your experience and bond.</p>
+            </div>
           </div>
           
           {profile?.couple_id && (

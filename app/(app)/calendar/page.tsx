@@ -3,10 +3,11 @@
 import { useState, useEffect, useCallback } from "react";
 import TopNavBar from "@/app/components/dashboard/TopNavBar";
 import AddEventModal from "@/components/calendar/AddEventModal";
+import AddScheduledEventModal from "@/components/calendar/AddScheduledEventModal";
 import CalendarGrid from "@/components/calendar/CalendarGrid";
 import EventSidebar from "@/components/calendar/EventSidebar";
 import { authFetch } from "@/utils/authFetch";
-import { Loader2 } from "lucide-react";
+import { Loader2, MessageSquare } from "lucide-react";
 import { playSound, SoundType } from "@/utils/sound";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -58,6 +59,8 @@ export default function CalendarPage() {
     fetchEvents();
   }, [fetchEvents]);
 
+  const [showScheduledModal, setShowScheduledModal] = useState(false);
+
   // ── Create event ──────────────────────────────────────────────────────────
 
   const handleAddEvent = async (eventData: Event) => {
@@ -96,6 +99,22 @@ export default function CalendarPage() {
       // Rollback optimistic update
       fetchEvents();
     }
+  };
+
+  const handleAddScheduledEvent = async (data: { title: string; message: string; scheduled_for: string }) => {
+    const res = await authFetch("/api/scheduled-events", {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
+      throw new Error(body?.error ?? "Failed to schedule event");
+    }
+
+    playSound(SoundType.SUCCESS);
+    // Refresh events to show the new one (if UI supports displaying them)
+    fetchEvents();
   };
 
   // ── Delete event ──────────────────────────────────────────────────────────
@@ -149,6 +168,13 @@ export default function CalendarPage() {
                 Syncing...
               </div>
             )}
+            <button
+              onClick={() => setShowScheduledModal(true)}
+              className="rounded-xl border border-purple-100 bg-white px-5 py-2.5 text-sm font-bold text-purple-600 shadow-sm transition-all hover:bg-purple-50 active:scale-95 flex items-center gap-2"
+            >
+              <MessageSquare size={16} />
+              Schedule Message
+            </button>
             <button
               onClick={() => setShowModal(true)}
               className="rounded-xl bg-brand-rose px-5 py-2.5 text-sm font-bold text-white shadow-sm shadow-rose-200 transition-all hover:bg-rose-600 active:scale-95"
@@ -238,6 +264,13 @@ export default function CalendarPage() {
           onClose={() => setShowModal(false)}
           onAdd={handleAddEvent}
           defaultDate={selectedDate.toISOString().split("T")[0]}
+        />
+      )}
+
+      {showScheduledModal && (
+        <AddScheduledEventModal
+          onClose={() => setShowScheduledModal(false)}
+          onAdd={handleAddScheduledEvent}
         />
       )}
     </div>

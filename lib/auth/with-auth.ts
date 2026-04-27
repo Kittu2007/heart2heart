@@ -78,7 +78,6 @@ export async function getAuthUser(req: NextRequest): Promise<UserContext> {
   }
 
   // 2. Profile missing, auto-create it using mapped dbId
-  console.log(`[Auth] Profile missing for ${firebaseUid} (DB ID: ${dbId}), auto-creating...`);
   
   const insertPayload = {
     id: dbId,

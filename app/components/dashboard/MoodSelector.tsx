@@ -1,9 +1,9 @@
 "use client";
 
 import { useState } from "react";
-import { Smile, Share2 } from "lucide-react";
+import { Smile, Share2, Plus, Check, X } from "lucide-react";
 
-const MOODS = [
+const PRESET_MOODS = [
   { id: "Happy", emoji: "😊", label: "Happy" },
   { id: "Loved", emoji: "🥰", label: "Loved" },
   { id: "Calm", emoji: "😌", label: "Calm" },
@@ -14,9 +14,9 @@ const MOODS = [
 
 interface MoodSelectorProps {
   selectedMood?: string;
-  onMoodChange?: (mood: string) => void;
+  onMoodChange?: (mood: string, emoji?: string, isCustom?: boolean) => Promise<void>;
   shareWithPartner?: boolean;
-  onShareToggle?: (shared: boolean) => void;
+  onShareToggle?: (shared: boolean) => Promise<void>;
 }
 
 export default function MoodSelector({
@@ -28,19 +28,42 @@ export default function MoodSelector({
   const [internalMood, setInternalMood] = useState("Happy");
   const [internalShare, setInternalShare] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
+  
+  // Custom mood state
+  const [isCustomMode, setIsCustomMode] = useState(false);
+  const [customLabel, setCustomLabel] = useState("");
+  const [customEmoji, setCustomEmoji] = useState("");
 
   const selectedMood = externalMood ?? internalMood;
   const shareWithPartner = externalShare ?? internalShare;
 
-  const handleMoodSelect = async (mood: string) => {
+  const handleMoodSelect = async (mood: string, emoji?: string) => {
     if (isSaving) return;
     setIsSaving(true);
+    setIsCustomMode(false);
     try {
       if (onMoodChange) {
-        await (onMoodChange as (mood: string) => Promise<void>)(mood);
+        await onMoodChange(mood, emoji, false);
       } else {
         setInternalMood(mood);
       }
+    } catch {
+      // silently handle
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  const handleCustomSubmit = async () => {
+    if (isSaving || !customLabel.trim()) return;
+    setIsSaving(true);
+    try {
+      if (onMoodChange) {
+        await onMoodChange(customLabel.trim(), customEmoji.trim() || "✨", true);
+      }
+      setIsCustomMode(false);
+      setCustomLabel("");
+      setCustomEmoji("");
     } catch {
       // silently handle
     } finally {
@@ -54,7 +77,7 @@ export default function MoodSelector({
     setIsSaving(true);
     try {
       if (onShareToggle) {
-        await (onShareToggle as (shared: boolean) => Promise<void>)(newValue);
+        await onShareToggle(newValue);
       } else {
         setInternalShare(newValue);
       }
@@ -78,37 +101,83 @@ export default function MoodSelector({
             )}
           </div>
         </div>
+        {!isCustomMode ? (
+          <button 
+            onClick={() => setIsCustomMode(true)}
+            className="p-1.5 rounded-lg hover:bg-black/5 text-[#78716c] transition-colors"
+            title="Custom Mood"
+          >
+            <Plus size={18} />
+          </button>
+        ) : (
+          <button 
+            onClick={() => setIsCustomMode(false)}
+            className="p-1.5 rounded-lg hover:bg-black/5 text-[#ef4444] transition-colors"
+          >
+            <X size={18} />
+          </button>
+        )}
       </div>
 
-      {/* Mood Grid */}
-      <div className="grid grid-cols-3 gap-2">
-        {MOODS.map((mood) => {
-          const isSelected = selectedMood === mood.id;
-          return (
-            <button
-              key={mood.id}
-              disabled={isSaving}
-              onClick={() => handleMoodSelect(mood.id)}
-              className={`flex flex-col items-center gap-1.5 py-3 px-2 rounded-2xl transition-all duration-200 border ${
-                isSelected
-                  ? "bg-brand-rose/10 border-brand-rose/30 shadow-sm scale-[1.03]"
-                  : "bg-transparent border-transparent hover:bg-black/[0.03] hover:border-black/5"
-              } ${isSaving ? "cursor-not-allowed opacity-60" : "cursor-pointer active:scale-95"}`}
-            >
-              <span className={`text-2xl transition-transform duration-200 ${isSelected ? "scale-110" : ""}`}>
-                {mood.emoji}
-              </span>
-              <span
-                className={`text-xs font-medium transition-colors ${
-                  isSelected ? "text-brand-rose font-semibold" : "text-[#78716c]"
-                }`}
+      {isCustomMode ? (
+        <div className="flex flex-col gap-3 animate-in fade-in slide-in-from-top-2 duration-300">
+          <div className="flex gap-2">
+            <input 
+              type="text" 
+              placeholder="Emoji (e.g. 🌧️)" 
+              value={customEmoji}
+              onChange={(e) => setCustomEmoji(e.target.value)}
+              className="w-16 bg-white border border-black/10 rounded-xl px-2 py-3 text-center text-xl outline-none focus:ring-2 focus:ring-brand-rose/20"
+              maxLength={2}
+            />
+            <input 
+              type="text" 
+              placeholder="How are you feeling?" 
+              value={customLabel}
+              onChange={(e) => setCustomLabel(e.target.value)}
+              className="flex-1 bg-white border border-black/10 rounded-xl px-4 py-3 text-sm outline-none focus:ring-2 focus:ring-brand-rose/20"
+              onKeyDown={(e) => e.key === "Enter" && handleCustomSubmit()}
+            />
+          </div>
+          <button 
+            onClick={handleCustomSubmit}
+            disabled={!customLabel.trim() || isSaving}
+            className="bg-brand-rose text-white py-3 rounded-xl font-bold text-sm shadow-md shadow-rose-100 hover:bg-rose-600 transition-all active:scale-95 disabled:opacity-50 flex items-center justify-center gap-2"
+          >
+            <Check size={18} />
+            Set Custom Mood
+          </button>
+        </div>
+      ) : (
+        <div className="grid grid-cols-3 gap-2">
+          {PRESET_MOODS.map((mood) => {
+            const isSelected = selectedMood === mood.id;
+            return (
+              <button
+                key={mood.id}
+                disabled={isSaving}
+                onClick={() => handleMoodSelect(mood.id, mood.emoji)}
+                className={`flex flex-col items-center gap-1.5 py-3 px-2 rounded-2xl transition-all duration-200 border ${
+                  isSelected
+                    ? "bg-brand-rose/10 border-brand-rose/30 shadow-sm scale-[1.03]"
+                    : "bg-transparent border-transparent hover:bg-black/[0.03] hover:border-black/5"
+                } ${isSaving ? "cursor-not-allowed opacity-60" : "cursor-pointer active:scale-95"}`}
               >
-                {mood.label}
-              </span>
-            </button>
-          );
-        })}
-      </div>
+                <span className={`text-2xl transition-transform duration-200 ${isSelected ? "scale-110" : ""}`}>
+                  {mood.emoji}
+                </span>
+                <span
+                  className={`text-xs font-medium transition-colors ${
+                    isSelected ? "text-brand-rose font-semibold" : "text-[#78716c]"
+                  }`}
+                >
+                  {mood.label}
+                </span>
+              </button>
+            );
+          })}
+        </div>
+      )}
 
       {/* Share Toggle */}
       <div className="flex items-center justify-between pt-2 border-t border-black/5">

@@ -4,6 +4,7 @@ import React, { useState, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { X, Calendar, Lock, Image as ImageIcon, Clock, Heart, Gift, Send, Sparkles, Upload, Camera } from 'lucide-react';
 import { getSupabase } from '@/lib/supabase/client';
+import { auth } from '@/utils/firebase/client';
 
 // ─── Shared Modal Shell ───────────────────────────────────────────────────────
 
@@ -366,22 +367,28 @@ export function CreateMemoryModal({ isOpen, onClose, onSubmit }: CreateMemoryMod
     setError('');
     
     try {
-      const supabase = getSupabase();
-      const fileExt = file.name.split('.').pop();
-      const fileName = `${Math.random().toString(36).substring(2)}-${Date.now()}.${fileExt}`;
-      const filePath = `memories/${fileName}`;
+      const user = auth.currentUser;
+      if (!user) throw new Error("Not authenticated");
+      const token = await user.getIdToken();
 
-      const { data, error: uploadError } = await supabase.storage
-        .from('memories')
-        .upload(filePath, file);
+      const formData = new FormData();
+      formData.append('file', file);
+      
+      const res = await fetch('/api/memories/upload', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${token}`
+        },
+        body: formData
+      });
 
-      if (uploadError) throw uploadError;
+      if (!res.ok) {
+        const errData = await res.json();
+        throw new Error(errData.error || 'Upload failed');
+      }
 
-      const { data: { publicUrl } } = supabase.storage
-        .from('memories')
-        .getPublicUrl(filePath);
-
-      setImageUrl(publicUrl);
+      const data = await res.json();
+      setImageUrl(data.image_url);
     } catch (err: any) {
       setError(err.message || 'Upload failed');
     } finally {

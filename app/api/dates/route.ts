@@ -16,7 +16,7 @@ export const GET = withAuth(async (req: NextRequest, user: UserContext) => {
   }
 
   try {
-    const { data: dates, error } = await supabaseAdmin
+    const { data: dates, error } = await (supabaseAdmin as any)
       .from('couple_dates')
       .select('*')
       .eq('couple_id', user.coupleId)
@@ -62,7 +62,7 @@ export const POST = withAuth(async (req: NextRequest, user: UserContext) => {
   const { title, type, date, description } = parsed.data;
 
   try {
-    const { data: inserted, error } = await supabaseAdmin
+    const { data: inserted, error } = await (supabaseAdmin as any)
       .from('couple_dates')
       .insert({
         couple_id: user.coupleId,
@@ -103,7 +103,7 @@ export const DELETE = withAuth(async (req: NextRequest, user: UserContext) => {
   }
 
   try {
-    const { error } = await supabaseAdmin
+    const { error } = await (supabaseAdmin as any)
       .from('couple_dates')
       .delete()
       .eq('id', id)

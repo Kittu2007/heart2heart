@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { 
   Calendar, 
@@ -15,6 +15,9 @@ import {
   Gift
 } from 'lucide-react';
 import { format, formatDistanceToNow, isAfter } from 'date-fns';
+import { CreateEventModal, CreateMessageModal, CreateMemoryModal } from './FeatureModals';
+import { auth } from '@/utils/firebase/client';
+import { playSound, SoundType } from '@/utils/sound';
 
 interface Event {
   id: string;
@@ -52,38 +55,106 @@ export default function CouplesFeatures({ coupleId, dbId }: CouplesFeaturesProps
   const [messages, setMessages] = useState<LockedMessage[]>([]);
   const [memories, setMemories] = useState<Memory[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+  
+  // Modal states
+  const [showEventModal, setShowEventModal] = useState(false);
+  const [showMessageModal, setShowMessageModal] = useState(false);
+  const [showMemoryModal, setShowMemoryModal] = useState(false);
 
-  // Fetch data
-  useEffect(() => {
+  // Fetch data function
+  const fetchData = useCallback(async () => {
     if (!coupleId) return;
+    setIsLoading(true);
+    try {
+      const user = auth.currentUser;
+      if (!user) return;
+      const token = await user.getIdToken();
+      
+      const headers = { 'Authorization': `Bearer ${token}` };
 
-    const fetchData = async () => {
-      setIsLoading(true);
-      try {
-        const [evRes, msgRes, memRes] = await Promise.all([
-          fetch('/api/events'),
-          fetch('/api/locked-messages'),
-          fetch('/api/memories')
-        ]);
+      const [evRes, msgRes, memRes] = await Promise.all([
+        fetch('/api/events', { headers }),
+        fetch('/api/locked-messages', { headers }),
+        fetch('/api/memories', { headers })
+      ]);
 
-        const [evData, msgData, memData] = await Promise.all([
-          evRes.json(),
-          msgRes.json(),
-          memRes.json()
-        ]);
+      const [evData, msgData, memData] = await Promise.all([
+        evRes.json(),
+        msgRes.json(),
+        memRes.json()
+      ]);
 
-        if (evData.events) setEvents(evData.events);
-        if (msgData.messages) setMessages(msgData.messages);
-        if (memData.memories) setMemories(memData.memories);
-      } catch (error) {
-        console.error('Error fetching features data:', error);
-      } finally {
-        setIsLoading(false);
-      }
-    };
-
-    fetchData();
+      if (evData.events) setEvents(evData.events);
+      if (msgData.messages) setMessages(msgData.messages);
+      if (memData.memories) setMemories(memData.memories);
+    } catch (error) {
+      console.error('Error fetching features data:', error);
+    } finally {
+      setIsLoading(false);
+    }
   }, [coupleId]);
+
+  useEffect(() => {
+    fetchData();
+  }, [fetchData]);
+
+  // Handlers
+  const handleCreateEvent = async (data: any) => {
+    const user = auth.currentUser;
+    if (!user) return;
+    const token = await user.getIdToken();
+    
+    const res = await fetch('/api/events', {
+      method: 'POST',
+      headers: { 
+        'Authorization': `Bearer ${token}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify(data)
+    });
+
+    if (!res.ok) throw new Error('Failed to create event');
+    playSound(SoundType.SUCCESS);
+    fetchData();
+  };
+
+  const handleCreateMessage = async (data: any) => {
+    const user = auth.currentUser;
+    if (!user) return;
+    const token = await user.getIdToken();
+    
+    const res = await fetch('/api/locked-messages', {
+      method: 'POST',
+      headers: { 
+        'Authorization': `Bearer ${token}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify(data)
+    });
+
+    if (!res.ok) throw new Error('Failed to create message');
+    playSound(SoundType.SUCCESS);
+    fetchData();
+  };
+
+  const handleCreateMemory = async (data: any) => {
+    const user = auth.currentUser;
+    if (!user) return;
+    const token = await user.getIdToken();
+    
+    const res = await fetch('/api/memories', {
+      method: 'POST',
+      headers: { 
+        'Authorization': `Bearer ${token}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify(data)
+    });
+
+    if (!res.ok) throw new Error('Failed to create memory');
+    playSound(SoundType.SUCCESS);
+    fetchData();
+  };
 
   if (!coupleId) {
     return (
@@ -151,7 +222,10 @@ export default function CouplesFeatures({ coupleId, dbId }: CouplesFeaturesProps
             >
               <div className="flex items-center justify-between">
                 <h3 className="font-bold text-gray-800 text-lg">Upcoming Events</h3>
-                <button className="p-2 bg-pink-500 text-white rounded-full hover:bg-pink-600 transition-colors shadow-sm shadow-pink-200">
+                <button 
+                  onClick={() => setShowEventModal(true)}
+                  className="p-2 bg-pink-500 text-white rounded-full hover:bg-pink-600 transition-colors shadow-sm shadow-pink-200"
+                >
                   <Plus className="w-5 h-5" />
                 </button>
               </div>
@@ -164,7 +238,10 @@ export default function CouplesFeatures({ coupleId, dbId }: CouplesFeaturesProps
                     <Calendar className="text-blue-400 w-6 h-6" />
                   </div>
                   <p className="text-gray-500">No events planned yet.</p>
-                  <button className="mt-4 text-pink-500 font-medium text-sm flex items-center justify-center gap-1 mx-auto hover:gap-2 transition-all">
+                  <button 
+                    onClick={() => setShowEventModal(true)}
+                    className="mt-4 text-pink-500 font-medium text-sm flex items-center justify-center gap-1 mx-auto hover:gap-2 transition-all"
+                  >
                     Plan your first date <ChevronRight className="w-4 h-4" />
                   </button>
                 </div>
@@ -207,7 +284,10 @@ export default function CouplesFeatures({ coupleId, dbId }: CouplesFeaturesProps
             >
               <div className="flex items-center justify-between">
                 <h3 className="font-bold text-gray-800 text-lg">Future Messages</h3>
-                <button className="p-2 bg-indigo-500 text-white rounded-full hover:bg-indigo-600 transition-colors shadow-sm shadow-indigo-200">
+                <button 
+                  onClick={() => setShowMessageModal(true)}
+                  className="p-2 bg-indigo-500 text-white rounded-full hover:bg-indigo-600 transition-colors shadow-sm shadow-indigo-200"
+                >
                   <Send className="w-5 h-5" />
                 </button>
               </div>
@@ -277,8 +357,11 @@ export default function CouplesFeatures({ coupleId, dbId }: CouplesFeaturesProps
             >
               <div className="flex items-center justify-between">
                 <h3 className="font-bold text-gray-800 text-lg">Shared Memories</h3>
-                <button className="p-2 bg-amber-500 text-white rounded-full hover:bg-amber-600 transition-colors shadow-sm shadow-amber-200">
-                  <ImageIcon className="w-5 h-5" />
+                <button 
+                  onClick={() => setShowMemoryModal(true)}
+                  className="p-2 bg-amber-500 text-white rounded-full hover:bg-amber-600 transition-colors shadow-sm shadow-amber-200"
+                >
+                  <Plus className="w-5 h-5" />
                 </button>
               </div>
 
@@ -314,6 +397,23 @@ export default function CouplesFeatures({ coupleId, dbId }: CouplesFeaturesProps
           )}
         </AnimatePresence>
       </div>
+
+      {/* Modals */}
+      <CreateEventModal 
+        isOpen={showEventModal} 
+        onClose={() => setShowEventModal(false)} 
+        onSubmit={handleCreateEvent} 
+      />
+      <CreateMessageModal 
+        isOpen={showMessageModal} 
+        onClose={() => setShowMessageModal(false)} 
+        onSubmit={handleCreateMessage} 
+      />
+      <CreateMemoryModal 
+        isOpen={showMemoryModal} 
+        onClose={() => setShowMemoryModal(false)} 
+        onSubmit={handleCreateMemory} 
+      />
     </div>
   );
 }

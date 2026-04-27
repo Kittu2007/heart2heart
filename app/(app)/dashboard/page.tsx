@@ -149,12 +149,53 @@ export default function DashboardPage() {
     return () => clearInterval(t);
   }, [currentUser]);
 
+  // ── NEW: Firestore real-time listener for couple status ────────────────
+  useEffect(() => {
+    if (!currentUser || !coupleId) return;
+    
+    const unsub = onSnapshot(doc(db, "couples", coupleId), (snap) => {
+      if (snap.exists()) {
+        const data = snap.data();
+        if (data.status && data.status !== coupleStatus) {
+          setCoupleStatus(data.status);
+          coupleStatusRef.current = data.status;
+          
+          // If it just became active, trigger a full re-fetch to get partner profile from Supabase
+          if (data.status === 'active') {
+            fetchCoupleFromSupabase(false);
+          }
+        }
+      } else {
+        // Couple record deleted in Firestore (means disconnected)
+        if (coupleStatusRef.current !== null) {
+          setCoupleStatus(null);
+          setCoupleId(null);
+          setPartner(null);
+          setPartnerDbId(null);
+          setInviteCode(null);
+          coupleStatusRef.current = null;
+          // Refresh to clean up Supabase state
+          fetchCoupleFromSupabase(false);
+        }
+      }
+    });
+    
+    return () => unsub();
+  }, [currentUser, coupleId, fetchCoupleFromSupabase, coupleStatus]);
+
   // ── Primary: Supabase couple fetch + polling ──────────────────────────
   useEffect(() => {
     if (!currentUser || authLoading) return;
     
-    setIsPartnerLoading(true);
+    // Only show loading on initial mount or if we have no data
+    if (!coupleId && !coupleStatus) {
+      setIsPartnerLoading(true);
+    }
+
     fetchCoupleFromSupabase(false).then(() => {
+      // Always ensure polling is running if not active
+      if (pollRef.current) clearInterval(pollRef.current);
+      
       if (coupleStatusRef.current !== "active") {
         pollRef.current = setInterval(() => fetchCoupleFromSupabase(true), 5000);
       }
@@ -370,7 +411,7 @@ export default function DashboardPage() {
     }
   }, [currentUser, fetchCoupleFromSupabase]);
 
-  if (authLoading) return (
+  if (authLoading && !currentUser) return (
     <div className="min-h-screen flex items-center justify-center" style={{ background: "linear-gradient(135deg, #FFF5F5 0%, #FFFBF0 100%)" }}>
       <div className="w-8 h-8 border-2 border-brand-rose/30 border-t-brand-rose rounded-full animate-spin" />
     </div>

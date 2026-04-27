@@ -12,14 +12,31 @@ const JoinSchema = z.object({
 // POST /api/couples/join
 export const POST = withAuth(async (req: NextRequest, user: UserContext) => {
   if (user.coupleId) {
-    const { data: couple } = await supabaseAdmin
+    const { data: couple, error: checkError } = await supabaseAdmin
       .from('couples')
-      .select('status')
+      .select('status, partner_a_id, partner_b_id')
       .eq('id', user.coupleId)
       .maybeSingle();
       
     if (couple?.status === 'active') {
-      return Response.json({ error: 'You are already part of a couple' }, { status: 409 });
+      // Check if the user is actually a member of this active couple
+      if (couple.partner_a_id === user.dbId || couple.partner_b_id === user.dbId) {
+        return Response.json({ 
+          error: 'You are already part of an active couple.',
+          details: 'Please disconnect from your current partner before joining a new one.',
+          code: 'ALREADY_CONNECTED'
+        }, { status: 409 });
+      } else {
+        // Orphaned couple reference in profile! Self-heal.
+        console.warn(`[Join] Clearing orphaned couple ${user.coupleId} for user ${user.dbId}`);
+        await (supabaseAdmin.from('profiles') as any).update({ couple_id: null }).eq('id', user.dbId);
+        // Continue to join logic...
+      }
+    } else if (!couple && !checkError) {
+      // Couple record gone but profile still points to it. Self-heal.
+      console.warn(`[Join] Clearing missing couple ${user.coupleId} for user ${user.dbId}`);
+      await (supabaseAdmin.from('profiles') as any).update({ couple_id: null }).eq('id', user.dbId);
+      // Continue to join logic...
     }
   }
 
@@ -73,7 +90,17 @@ export const POST = withAuth(async (req: NextRequest, user: UserContext) => {
 
     if (profilesUpdateError) throw profilesUpdateError;
 
-    // 5. Sync to Firestore
+    // 5. Cleanup any old pending couples where this user was partner_a
+    try {
+      await couplesQuery
+        .delete()
+        .eq('partner_a_id', user.dbId)
+        .eq('status', 'pending');
+    } catch (e) {
+      console.warn('[JOIN] Failed to cleanup old pending couples (non-fatal):', e);
+    }
+
+    // 6. Sync to Firestore
     const syncPromises = [
       syncProfileToFirestore(user.uid, { coupleId: couple.id, dbId: user.dbId }),
       syncCoupleToFirestore(couple.id, { 

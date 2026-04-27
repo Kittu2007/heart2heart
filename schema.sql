@@ -177,10 +177,88 @@ CREATE TABLE IF NOT EXISTS couple_dates (
   created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
+CREATE TABLE IF NOT EXISTS events (
+  id          UUID        PRIMARY KEY DEFAULT uuid_generate_v4(),
+  couple_id   UUID        NOT NULL REFERENCES couples(id)   ON DELETE CASCADE,
+  created_by  UUID        NOT NULL REFERENCES profiles(id),
+  title       TEXT        NOT NULL,
+  description TEXT,
+  event_type  TEXT        CHECK (event_type IN ('date','countdown','message')),
+  event_date  TIMESTAMPTZ NOT NULL,
+  created_at  TIMESTAMPTZ DEFAULT NOW()
+);
+
 CREATE INDEX IF NOT EXISTS idx_couple_dates_couple_id ON couple_dates(couple_id);
+CREATE INDEX IF NOT EXISTS idx_events_couple_id  ON events(couple_id);
+CREATE INDEX IF NOT EXISTS idx_events_event_date ON events(event_date);
 
 ALTER TABLE couple_dates ENABLE ROW LEVEL SECURITY;
+ALTER TABLE events ENABLE ROW LEVEL SECURITY;
 
 CREATE POLICY "Users can view couple dates" ON couple_dates FOR SELECT USING (couple_id IN (SELECT couple_id FROM profiles WHERE id = auth.uid()));
 CREATE POLICY "Users can insert couple dates" ON couple_dates FOR INSERT WITH CHECK (couple_id IN (SELECT couple_id FROM profiles WHERE id = auth.uid()) AND created_by = auth.uid());
 CREATE POLICY "Users can delete couple dates" ON couple_dates FOR DELETE USING (couple_id IN (SELECT couple_id FROM profiles WHERE id = auth.uid()));
+
+CREATE POLICY "Couple can view events" ON events FOR SELECT USING (couple_id IN (SELECT couple_id FROM profiles WHERE id = auth.uid()));
+CREATE POLICY "Couple can insert events" ON events FOR INSERT WITH CHECK (created_by = auth.uid());
+CREATE POLICY "Creator can delete events" ON events FOR DELETE USING (created_by = auth.uid());
+
+-- Locked Messages
+CREATE TABLE IF NOT EXISTS locked_messages (
+  id         UUID        PRIMARY KEY DEFAULT uuid_generate_v4(),
+  couple_id  UUID        NOT NULL REFERENCES couples(id) ON DELETE CASCADE,
+  sender_id  UUID        NOT NULL REFERENCES profiles(id) ON DELETE CASCADE,
+  content    TEXT        NOT NULL,
+  unlock_at  TIMESTAMPTZ NOT NULL,
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+ALTER TABLE locked_messages ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY "Couple can view locked messages"
+ON locked_messages FOR SELECT
+USING (couple_id IN (
+  SELECT couple_id FROM profiles WHERE id = auth.uid()
+));
+
+CREATE POLICY "Sender can insert locked message"
+ON locked_messages FOR INSERT
+WITH CHECK (sender_id = auth.uid());
+
+CREATE POLICY "Sender can delete own locked message"
+ON locked_messages FOR DELETE
+USING (sender_id = auth.uid());
+
+CREATE INDEX IF NOT EXISTS idx_locked_messages_couple_id ON locked_messages(couple_id);
+CREATE INDEX IF NOT EXISTS idx_locked_messages_unlock_at  ON locked_messages(unlock_at);
+
+-- Memories
+CREATE TABLE IF NOT EXISTS memories (
+  id          UUID        PRIMARY KEY DEFAULT uuid_generate_v4(),
+  couple_id   UUID        NOT NULL REFERENCES couples(id)   ON DELETE CASCADE,
+  uploaded_by UUID        NOT NULL REFERENCES profiles(id)  ON DELETE CASCADE,
+  title       TEXT        NOT NULL,
+  description TEXT,
+  memory_date TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  image_url   TEXT,
+  mood        TEXT,
+  created_at  TIMESTAMPTZ DEFAULT NOW()
+);
+
+ALTER TABLE memories ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY "Couple can view memories"
+ON memories FOR SELECT
+USING (couple_id IN (SELECT couple_id FROM profiles WHERE id = auth.uid()));
+
+CREATE POLICY "User can insert own memory"
+ON memories FOR INSERT
+WITH CHECK (uploaded_by = auth.uid());
+
+CREATE POLICY "Uploader can delete own memory"
+ON memories FOR DELETE
+USING (uploaded_by = auth.uid());
+
+CREATE INDEX IF NOT EXISTS idx_memories_couple_id  ON memories(couple_id);
+CREATE INDEX IF NOT EXISTS idx_memories_memory_date ON memories(memory_date DESC);
+

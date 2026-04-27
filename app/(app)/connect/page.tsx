@@ -264,13 +264,35 @@ export default function ConnectPage() {
                       {isConnecting ? (<><Loader2 className="w-5 h-5 animate-spin" /><span>Connecting...</span></>) : (<><HeartHandshake size={20} /><span>Connect Partner</span></>)}
                     </button>
 
-                    <button
-                      type="button"
-                      onClick={() => router.push('/dashboard')}
-                      className="w-full mt-4 text-[#86868b] text-[11px] font-bold hover:text-[#1D1D1F] transition-colors py-2 uppercase tracking-widest"
-                    >
-                      Skip for now, continue to Dashboard
-                    </button>
+                    <div className="flex flex-col gap-2 pt-2">
+                      <button
+                        type="button"
+                        onClick={() => router.push('/dashboard')}
+                        className="w-full text-[#86868b] text-[11px] font-bold hover:text-[#1D1D1F] transition-colors py-1 uppercase tracking-widest"
+                      >
+                        Skip for now, continue to Dashboard
+                      </button>
+                      
+                      <button
+                        type="button"
+                        onClick={async () => {
+                          if (!confirm('This will clear your current connection status and let you start over. Continue?')) return;
+                          setIsConnecting(true);
+                          try {
+                            await authFetch('/api/couples', { method: 'DELETE' });
+                            alert('Profile reset successfully. You can now try connecting again.');
+                            window.location.reload();
+                          } catch (err: any) {
+                            alert(err.message || 'Failed to reset profile');
+                          } finally {
+                            setIsConnecting(false);
+                          }
+                        }}
+                        className="w-full text-brand-rose/60 text-[10px] font-bold hover:text-brand-rose transition-colors py-1 uppercase tracking-widest flex items-center justify-center gap-1.5"
+                      >
+                        <RefreshCw size={10} /> Having issues? Reset Profile
+                      </button>
+                    </div>
                   </form>
                 </div>
               </motion.div>

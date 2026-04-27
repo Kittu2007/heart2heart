@@ -89,6 +89,17 @@ CREATE TABLE IF NOT EXISTS ai_logs (
   created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
+CREATE TABLE IF NOT EXISTS calendar_events (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  user_id UUID NOT NULL REFERENCES profiles(id) ON DELETE CASCADE,
+  couple_id UUID REFERENCES couples(id) ON DELETE CASCADE,
+  title TEXT NOT NULL,
+  type TEXT NOT NULL CHECK (type IN ('date', 'countdown', 'message')),
+  date DATE NOT NULL,
+  description TEXT,
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
 CREATE INDEX IF NOT EXISTS idx_profiles_couple_id ON profiles(couple_id);
 CREATE INDEX IF NOT EXISTS idx_profiles_is_admin ON profiles(is_admin) WHERE is_admin = TRUE;
 CREATE INDEX IF NOT EXISTS idx_couples_invite_code ON couples(invite_code);
@@ -99,6 +110,8 @@ CREATE INDEX IF NOT EXISTS idx_feedback_couple_id ON feedback(couple_id);
 CREATE INDEX IF NOT EXISTS idx_mood_checkins_user_id ON mood_checkins(user_id);
 CREATE INDEX IF NOT EXISTS idx_ai_logs_timestamp ON ai_logs(timestamp);
 CREATE INDEX IF NOT EXISTS idx_ai_logs_status ON ai_logs(status);
+CREATE INDEX IF NOT EXISTS idx_calendar_events_user_id ON calendar_events(user_id);
+CREATE INDEX IF NOT EXISTS idx_calendar_events_couple_date ON calendar_events(couple_id, date);
 
 ALTER TABLE profiles ENABLE ROW LEVEL SECURITY;
 ALTER TABLE couples ENABLE ROW LEVEL SECURITY;
@@ -107,6 +120,7 @@ ALTER TABLE daily_tasks ENABLE ROW LEVEL SECURITY;
 ALTER TABLE feedback ENABLE ROW LEVEL SECURITY;
 ALTER TABLE mood_checkins ENABLE ROW LEVEL SECURITY;
 ALTER TABLE ai_logs ENABLE ROW LEVEL SECURITY;
+ALTER TABLE calendar_events ENABLE ROW LEVEL SECURITY;
 
 CREATE POLICY "Users can view own profile" ON profiles FOR SELECT USING (auth.uid() = id);
 CREATE POLICY "Users can view partner profile" ON profiles FOR SELECT USING (couple_id IS NOT NULL AND couple_id IN (SELECT couple_id FROM profiles WHERE id = auth.uid()));
@@ -133,6 +147,10 @@ CREATE POLICY "Users can insert own feedback" ON feedback FOR INSERT WITH CHECK 
 CREATE POLICY "Users can view own mood" ON mood_checkins FOR SELECT USING (user_id = auth.uid());
 CREATE POLICY "Partner can view shared mood" ON mood_checkins FOR SELECT USING (share_with_partner = TRUE AND couple_id IN (SELECT couple_id FROM profiles WHERE id = auth.uid()) AND user_id != auth.uid());
 CREATE POLICY "Users can insert own mood" ON mood_checkins FOR INSERT WITH CHECK (user_id = auth.uid());
+
+CREATE POLICY "Users can view own calendar events" ON calendar_events FOR SELECT USING (user_id = auth.uid());
+CREATE POLICY "Users can insert own calendar events" ON calendar_events FOR INSERT WITH CHECK (user_id = auth.uid());
+CREATE POLICY "Users can delete own calendar events" ON calendar_events FOR DELETE USING (user_id = auth.uid());
 
 CREATE OR REPLACE FUNCTION generate_invite_code()
 RETURNS TEXT AS $$

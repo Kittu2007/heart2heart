@@ -5,202 +5,224 @@ import TopNavBar from "@/app/components/dashboard/TopNavBar";
 import AddEventModal from "@/components/calendar/AddEventModal";
 import CalendarGrid from "@/components/calendar/CalendarGrid";
 import EventSidebar from "@/components/calendar/EventSidebar";
-import { isUnlocked, isSameDay } from "@/lib/calendar/utils";
-import { useAuth } from "@/lib/contexts/auth-context";
-import { auth } from "@/utils/firebase/client";
+import { authFetch } from "@/utils/authFetch";
+import { Loader2 } from "lucide-react";
+import { playSound, SoundType } from "@/utils/sound";
+
+// ─── Types ────────────────────────────────────────────────────────────────────
 
 type Event = {
   id: string;
   title: string;
   type: "date" | "countdown" | "message";
-  date: string;
+  date: string; // YYYY-MM-DD
   description?: string;
 };
 
-const MONTH_NAMES = [
-  "January", "February", "March", "April", "May", "June",
-  "July", "August", "September", "October", "November", "December",
-];
-
-const makeIsoDate = (date: Date) => date.toISOString().split("T")[0];
-
-async function authFetch(url: string, options: RequestInit = {}) {
-  const user = auth.currentUser;
-  if (!user) throw new Error("Not authenticated");
-  const token = await user.getIdToken(true);
-  const res = await fetch(url, {
-    ...options,
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${token}`,
-      ...(options.headers || {}),
-    },
-  });
-  const data = await res.json();
-  if (!res.ok) throw new Error(data.error || `Request failed (${res.status})`);
-  return data;
-}
+// ─── Component ────────────────────────────────────────────────────────────────
 
 export default function CalendarPage() {
-  const { user: currentUser } = useAuth();
-
-  const now = new Date();
-  const [currentMonth, setCurrentMonth] = useState(
-    new Date(now.getFullYear(), now.getMonth(), 1)
-  );
-  const [selectedDate, setSelectedDate] = useState(now);
+  const [currentMonth, setCurrentMonth] = useState(new Date());
+  const [selectedDate, setSelectedDate] = useState(new Date());
   const [events, setEvents] = useState<Event[]>([]);
   const [showModal, setShowModal] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  // ── Fetch events ──────────────────────────────────────────────────────────
 
   const fetchEvents = useCallback(async () => {
-    if (!currentUser) return;
     setIsLoading(true);
+    setError(null);
     try {
-      const data = await authFetch("/api/dates");
-      if (data.events) {
-        setEvents(data.events);
+      const res = await authFetch("/api/calendar-events");
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        throw new Error(body?.error ?? `Server error: ${res.status}`);
       }
-    } catch (e) {
-      console.error("Error fetching events:", e);
+      const data = await res.json();
+      
+      // Map API fields (date) to UI Event type if needed
+      // API currently returns: { id, title, type, date, description, ... }
+      setEvents(data ?? []);
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : "Failed to load calendar events.";
+      console.error("[CalendarPage] fetchEvents error:", err);
+      setError(message);
     } finally {
       setIsLoading(false);
     }
-  }, [currentUser]);
+  }, []);
 
   useEffect(() => {
     fetchEvents();
   }, [fetchEvents]);
 
-  const prevMonth = () => {
-    setCurrentMonth(
-      (month) => new Date(month.getFullYear(), month.getMonth() - 1, 1)
-    );
-  };
-
-  const nextMonth = () => {
-    setCurrentMonth(
-      (month) => new Date(month.getFullYear(), month.getMonth() + 1, 1)
-    );
-  };
+  // ── Create event ──────────────────────────────────────────────────────────
 
   const handleAddEvent = async (eventData: Event) => {
-    const { id, ...data } = eventData;
-    
-    // Optimistic update
-    const tempId = `temp-${Date.now()}`;
-    setEvents((prev) => [...prev, { ...eventData, id: tempId }]);
-    
     try {
-      const result = await authFetch("/api/dates", {
+      // Optimistic update
+      const tempId = `temp-${Date.now()}`;
+      const newEvent = { ...eventData, id: tempId };
+      setEvents((prev) => [...prev, newEvent]);
+      
+      const res = await authFetch("/api/calendar-events", {
         method: "POST",
-        body: JSON.stringify(data),
+        body: JSON.stringify({
+          title: eventData.title,
+          description: eventData.description,
+          start_time: eventData.date, // API handles conversion or expects ISO
+          event_type: eventData.type,
+        }),
       });
-      if (result.event) {
-        setEvents((prev) => prev.map((e) => e.id === tempId ? result.event : e));
+
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        throw new Error(body?.error ?? `Failed to create event: ${res.status}`);
       }
-    } catch (e) {
-      console.error("Error adding event:", e);
-      alert("Failed to save event. Please try again.");
-      setEvents((prev) => prev.filter((e) => e.id !== tempId));
+
+      const result = await res.json();
+      // Replace temp ID with real ID from DB
+      setEvents((prev) => prev.map((e) => e.id === tempId ? { ...result, start_time: result.date } : e));
+      playSound(SoundType.SUCCESS);
+      
+      // Final sync to be sure
+      fetchEvents();
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : "Failed to create event.";
+      console.error("[CalendarPage] handleAddEvent error:", err);
+      setError(message);
+      // Rollback optimistic update
+      fetchEvents();
     }
   };
+
+  // ── Delete event ──────────────────────────────────────────────────────────
 
   const handleDeleteEvent = async (eventId: string) => {
     const confirmed = window.confirm("Delete this event?");
     if (!confirmed) return;
-    
+
     // Optimistic update
     const previousEvents = [...events];
     setEvents((prev) => prev.filter((e) => e.id !== eventId));
-    
+
     try {
-      await authFetch(`/api/dates?id=${eventId}`, { method: "DELETE" });
-    } catch (e) {
-      console.error("Error deleting event:", e);
-      alert("Failed to delete event.");
+      const res = await authFetch(`/api/calendar-events?id=${eventId}`, {
+        method: "DELETE",
+      });
+
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        throw new Error(body?.error ?? `Failed to delete event: ${res.status}`);
+      }
+      
+      playSound(SoundType.CLICK);
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : "Failed to delete event.";
+      console.error("[CalendarPage] handleDeleteEvent error:", err);
+      setError(message);
+      // Rollback
       setEvents(previousEvents);
     }
   };
 
-  const selectedDateIso = makeIsoDate(selectedDate);
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
-
-  const totalEvents = events.length;
-  const upcomingEvents = events.filter((event) => {
-    const date = new Date(event.date);
-    date.setHours(0, 0, 0, 0);
-    return date >= today;
-  }).length;
-  const lockedMessages = events.filter(
-    (event) => event.type === "message" && !isUnlocked(event.date)
-  ).length;
+  // ── Render ────────────────────────────────────────────────────────────────
 
   return (
-    <div className="min-h-screen bg-[#F9F9F7]">
+    <div className="min-h-screen bg-[#fafaf9] pb-20">
       <TopNavBar />
 
       <main className="mx-auto w-full max-w-[1200px] px-6 py-10">
-        <div className="mb-6 flex items-center justify-between">
+        <div className="mb-10 flex items-center justify-between">
           <div>
             <p className="mb-1 text-xs font-semibold uppercase tracking-widest text-brand-rose/70">
               Your Moments
             </p>
             <h1 className="text-3xl font-bold text-[#1a1c1b]">Calendar</h1>
           </div>
-          {isLoading && (
-            <div className="flex items-center gap-2 text-xs text-brand-rose/60 animate-pulse font-medium">
-              <div className="w-1.5 h-1.5 bg-brand-rose rounded-full" />
-              Syncing events...
-            </div>
-          )}
+          <div className="flex items-center gap-4">
+            {isLoading && (
+              <div className="flex items-center gap-2 text-xs text-brand-rose/60 animate-pulse font-medium">
+                <Loader2 className="w-4 h-4 animate-spin" />
+                Syncing...
+              </div>
+            )}
+            <button
+              onClick={() => setShowModal(true)}
+              className="rounded-xl bg-brand-rose px-5 py-2.5 text-sm font-bold text-white shadow-sm shadow-rose-200 transition-all hover:bg-rose-600 active:scale-95"
+            >
+              + New Event
+            </button>
+          </div>
         </div>
 
-        <div className="grid grid-cols-1 gap-6 lg:grid-cols-[1fr_340px]">
-          <section className="overflow-hidden rounded-3xl border border-rose-100 bg-white shadow-sm">
-            <header className="flex items-center justify-between bg-gradient-to-r from-rose-400 to-pink-400 px-6 py-5 text-white">
-              <button
-                onClick={prevMonth}
-                className="flex h-9 w-9 items-center justify-center rounded-xl bg-white/20 transition-colors hover:bg-white/30 active:scale-95"
-              >
-                ‹
-              </button>
-              <div className="text-center">
-                <h2 className="text-xl font-bold">
-                  {MONTH_NAMES[currentMonth.getMonth()]}
-                </h2>
-                <p className="text-sm text-rose-100">{currentMonth.getFullYear()}</p>
-              </div>
-              <button
-                onClick={nextMonth}
-                className="flex h-9 w-9 items-center justify-center rounded-xl bg-white/20 transition-colors hover:bg-white/30 active:scale-95"
-              >
-                ›
-              </button>
-            </header>
+        {error && (
+          <div className="mb-8 rounded-2xl bg-red-50 border border-red-100 p-4 text-sm text-red-600 flex items-center gap-3">
+            <div className="w-1.5 h-1.5 bg-red-500 rounded-full shrink-0" />
+            {error}
+            <button onClick={() => fetchEvents()} className="ml-auto underline font-bold">Retry</button>
+          </div>
+        )}
 
-            <div className="px-5 py-5">
+        <div className="grid grid-cols-1 gap-10 lg:grid-cols-12">
+          {/* Main Calendar View */}
+          <section className="lg:col-span-8">
+            <div className="rounded-[32px] border border-black/5 bg-white p-8 shadow-sm">
+              <div className="mb-8 flex items-center justify-between">
+                <h2 className="text-xl font-bold text-[#1a1c1b]">
+                  {currentMonth.toLocaleString("default", {
+                    month: "long",
+                    year: "numeric",
+                  })}
+                </h2>
+                <div className="flex gap-2">
+                  <button
+                    onClick={() =>
+                      setCurrentMonth(
+                        new Date(
+                          currentMonth.getFullYear(),
+                          currentMonth.getMonth() - 1,
+                          1
+                        )
+                      )
+                    }
+                    className="rounded-xl border border-black/5 p-2 text-neutral-400 hover:bg-neutral-50 hover:text-neutral-600"
+                  >
+                    ??
+                  </button>
+                  <button
+                    onClick={() =>
+                      setCurrentMonth(
+                        new Date(
+                          currentMonth.getFullYear(),
+                          currentMonth.getMonth() + 1,
+                          1
+                        )
+                      )
+                    }
+                    className="rounded-xl border border-black/5 p-2 text-neutral-400 hover:bg-neutral-50 hover:text-neutral-600"
+                  >
+                    ??
+                  </button>
+                </div>
+              </div>
+
               <CalendarGrid
                 currentMonth={currentMonth}
                 selectedDate={selectedDate}
                 events={events}
-                onSelectDate={setSelectedDate}
+                onSelectDate={(date) => {
+                  setSelectedDate(date);
+                  playSound(SoundType.CLICK);
+                }}
               />
-            </div>
-
-            <div className="border-t border-rose-50 px-5 py-4">
-              <p className="text-xs text-neutral-500">
-                {events.some((event) =>
-                  isSameDay(new Date(event.date), selectedDate)
-                )
-                  ? "This day has one or more saved moments."
-                  : "Select any date and add a special moment."}
-              </p>
             </div>
           </section>
 
-          <section className="max-h-[680px] overflow-y-auto rounded-3xl border border-rose-100 bg-white px-5 py-5 shadow-sm">
+          {/* Sidebar */}
+          <section className="lg:col-span-4">
             <EventSidebar
               selectedDate={selectedDate}
               events={events}
@@ -209,28 +231,13 @@ export default function CalendarPage() {
             />
           </section>
         </div>
-
-        <section className="mt-6 grid grid-cols-1 gap-4 sm:grid-cols-3">
-          <div className="rounded-3xl bg-gradient-to-r from-rose-400 to-pink-400 p-4 text-white shadow-sm">
-            <p className="text-sm font-semibold opacity-95">Total Events</p>
-            <p className="mt-1 text-3xl font-bold">{totalEvents}</p>
-          </div>
-          <div className="rounded-3xl bg-gradient-to-r from-amber-400 to-orange-400 p-4 text-white shadow-sm">
-            <p className="text-sm font-semibold opacity-95">Upcoming</p>
-            <p className="mt-1 text-3xl font-bold">{upcomingEvents}</p>
-          </div>
-          <div className="rounded-3xl bg-gradient-to-r from-purple-400 to-violet-400 p-4 text-white shadow-sm">
-            <p className="text-sm font-semibold opacity-95">Locked Messages</p>
-            <p className="mt-1 text-3xl font-bold">{lockedMessages}</p>
-          </div>
-        </section>
       </main>
 
       {showModal && (
         <AddEventModal
           onClose={() => setShowModal(false)}
           onAdd={handleAddEvent}
-          defaultDate={selectedDateIso}
+          defaultDate={selectedDate.toISOString().split("T")[0]}
         />
       )}
     </div>
